@@ -1,0 +1,12 @@
+.idea/
+
+Backend/target/
+Backend/.env
+Backend/.env.*
+!Backend/.env.example
+
+Frontend/node_modules/
+Frontend/dist/
+Frontend/.env
+Frontend/.env.*
+!Frontend/.env.example
