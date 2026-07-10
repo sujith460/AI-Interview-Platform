@@ -6,8 +6,11 @@ export default function Input({
   error,
   className,
   containerClassName,
+  as,
   ...props
 }) {
+  const Component = as === 'textarea' ? 'textarea' : 'input';
+
   return (
     <div className={cn('space-y-2', containerClassName)}>
       {label && (
@@ -18,7 +21,7 @@ export default function Input({
           {label}
         </label>
       )}
-      <input
+      <Component
         id={id}
         className={cn(
           'w-full rounded-xl border bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none transition',

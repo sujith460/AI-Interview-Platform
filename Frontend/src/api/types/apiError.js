@@ -41,6 +41,13 @@ export function parseApiError(error) {
     };
   }
 
+  if (status === 401) {
+    return {
+      message: data.message || 'Invalid email or password.',
+      fieldErrors: {},
+    };
+  }
+
   return {
     message: 'Something went wrong. Please try again.',
     fieldErrors: {},

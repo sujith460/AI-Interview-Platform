@@ -32,13 +32,25 @@ public class User {
     @Column(nullable = false)
     private Role role;
 
-    private String profileImageUrl;
+    private String bio;
 
     private String githubUrl;
 
+    private String leetcodeUrl;
+
     private String linkedinUrl;
 
-    private String leetcodeUrl;
+    private String resumeUrl;
+
+    private Integer experience;
+
+    private String targetRole;
+
+    @Column(length = 1000)
+    private String skills;
+
+
+
 
     @Column(nullable = false)
     private LocalDateTime createdAt;
