@@ -27,18 +27,17 @@ public class Question {
     @Column(nullable = false, unique = true, length = 350)
     private String slug;
 
-    @Lob
-    @Column(nullable = false)
+    @Column(columnDefinition = "TEXT" , nullable = false)
     private String description;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Difficulty difficulty;
 
-    @Lob
+    @Column(columnDefinition = "TEXT")
     private String constraints;
 
-    @Lob
+    @Column(columnDefinition = "TEXT")
     private String examples;
 
     @Column(length = 1000)
@@ -67,6 +66,20 @@ public class Question {
             inverseJoinColumns = @JoinColumn(name = "pattern_id")
     )
     private Set<Pattern> patterns = new HashSet<>();
+
+    @OneToMany(
+            mappedBy = "question",
+            cascade = CascadeType.ALL,
+            orphanRemoval = true
+    )
+    private Set<TestCase> testCases = new HashSet<>();
+
+    @OneToMany(
+            mappedBy = "question",
+            cascade = CascadeType.ALL,
+            orphanRemoval = true
+    )
+    private Set<LanguageTemplate> languageTemplates = new HashSet<>();
 
     private Integer frequencyScore;
 

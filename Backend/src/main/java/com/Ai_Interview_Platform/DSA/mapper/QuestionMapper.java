@@ -2,33 +2,55 @@ package com.Ai_Interview_Platform.DSA.mapper;
 
 import com.Ai_Interview_Platform.DSA.dto.question.QuestionRequestDTO;
 import com.Ai_Interview_Platform.DSA.dto.question.QuestionResponseDTO;
+import com.Ai_Interview_Platform.DSA.dto.question.QuestionUpdateDTO;
+import com.Ai_Interview_Platform.DSA.entity.Company;
+import com.Ai_Interview_Platform.DSA.entity.Pattern;
 import com.Ai_Interview_Platform.DSA.entity.Question;
 import org.mapstruct.*;
+
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Mapper(componentModel = "spring")
 public interface QuestionMapper {
 
-    @Mapping(target = "companies", ignore = true)
-    @Mapping(target = "patterns", ignore = true)d
-    @Mapping(target = "id", ignore = true)
-    @Mapping(target = "slug", ignore = true)
-    @Mapping(target = "createdAt", ignore = true)
-    @Mapping(target = "updatedAt", ignore = true)
-    Question toEntity(QuestionRequestDTO dto);
+        @Mapping(target = "companies", ignore = true)
+        @Mapping(target = "patterns", ignore = true)
+        @Mapping(target = "id", ignore = true)
+        @Mapping(target = "slug", ignore = true)
+        @Mapping(target = "createdAt", ignore = true)
+        @Mapping(target = "updatedAt", ignore = true)
+        Question toEntity(QuestionRequestDTO dto);
 
-    @BeanMapping(
-            nullValuePropertyMappingStrategy =
-                    NullValuePropertyMappingStrategy.IGNORE
-    )
-    @Mapping(target = "companies", ignore = true)
-    @Mapping(target = "patterns", ignore = true)
-    @Mapping(target = "id", ignore = true)
-    @Mapping(target = "slug", ignore = true)
-    @Mapping(target = "createdAt", ignore = true)
-    @Mapping(target = "updatedAt", ignore = true)
-    void updateQuestionFromDto(
-            QuestionRequestDTO dto,
-            @MappingTarget Question question
-    );
+        @BeanMapping(
+                nullValuePropertyMappingStrategy =
+                        NullValuePropertyMappingStrategy.IGNORE
+        )
+        @Mapping(target = "companies", ignore = true)
+        @Mapping(target = "patterns", ignore = true)
+        @Mapping(target = "id", ignore = true)
+        @Mapping(target = "slug", ignore = true)
+        @Mapping(target = "createdAt", ignore = true)
+        @Mapping(target = "updatedAt", ignore = true)
+        void updateQuestionFromDto(
+                QuestionUpdateDTO dto,
+                @MappingTarget Question question);
+
+        @Mapping(target = "companies", expression = "java(mapCompanies(question.getCompanies()))")
+        @Mapping(target = "patterns", expression = "java(mapPatterns(question.getPatterns()))")
+        QuestionResponseDTO toResponse(Question question);
+
+        default Set<String> mapCompanies(Set<Company> companies) {
+            return companies.stream()
+                    .map(Company::getName)
+                    .collect(Collectors.toSet());
+        }
+
+        default Set<String> mapPatterns(Set<Pattern> patterns) {
+            return patterns.stream()
+                    .map(Pattern::getName)
+                    .collect(Collectors.toSet());
+        }
 
 }
+

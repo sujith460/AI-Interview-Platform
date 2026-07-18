@@ -7,6 +7,7 @@ import ThemeToggle from '@/components/common/ThemeToggle';
 import useCurrentUser from '@/hooks/user/useCurrentUser';
 import { TOKEN_KEY } from '@/utils/constants/auth';
 import { UPCOMING_FEATURES } from '@/utils/constants/dashboard';
+import { cn } from '@/utils/helpers/cn';
 
 export default function DashboardPage() {
   const navigate = useNavigate();
@@ -147,17 +148,26 @@ export default function DashboardPage() {
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {UPCOMING_FEATURES.map(({ title, description, icon: Icon, accent, statusClass }) => (
-                  <ComingSoonCard
-                    key={title}
-                    title={title}
-                    description={description}
-                    accent={accent}
-                    statusClass={statusClass}
-                  >
-                    <Icon />
-                  </ComingSoonCard>
-                ))}
+                {UPCOMING_FEATURES.map(({ title, description, icon: Icon, accent, statusClass }) => {
+                  let onClick = null;
+                  if (title === 'Practice Coding') {
+                    onClick = () => navigate('/practice');
+                  } else if (title === 'Profile') {
+                    onClick = () => navigate('/profile');
+                  }
+                  return (
+                    <DashboardCard
+                      key={title}
+                      title={title}
+                      description={description}
+                      accent={accent}
+                      statusClass={statusClass}
+                      onClick={onClick}
+                    >
+                      <Icon />
+                    </DashboardCard>
+                  );
+                })}
               </div>
             </section>
           </div>
@@ -178,11 +188,18 @@ function ProfileField({ label, value, className }) {
   );
 }
 
-function ComingSoonCard({ title, description, accent, statusClass, children }) {
+function DashboardCard({ title, description, accent, statusClass, onClick, children }) {
+  const isActive = !!onClick;
   return (
     <Card
-      aria-disabled="true"
-      className="p-5 opacity-90 transition duration-200"
+      onClick={onClick}
+      className={cn(
+        "p-5 transition-all duration-200 border border-slate-200/60 dark:border-white/5",
+        isActive 
+          ? "cursor-pointer hover:-translate-y-1 hover:shadow-lg dark:hover:border-violet-500/30 dark:hover:bg-white/[0.03] hover:border-violet-500/20" 
+          : "opacity-90"
+      )}
+      aria-disabled={!isActive}
     >
       <div
         className={`mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br ${accent} text-white shadow-lg`}
@@ -193,7 +210,16 @@ function ComingSoonCard({ title, description, accent, statusClass, children }) {
       <p className="mt-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
         {description}
       </p>
-      <p className={`mt-4 text-xs font-medium ${statusClass}`}>Coming Soon</p>
+      {isActive ? (
+        <p className="mt-4 text-xs font-bold text-violet-600 dark:text-violet-400 flex items-center gap-1">
+          Get Started
+          <svg className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
+          </svg>
+        </p>
+      ) : (
+        <p className={`mt-4 text-xs font-medium ${statusClass}`}>Coming Soon</p>
+      )}
     </Card>
   );
 }
