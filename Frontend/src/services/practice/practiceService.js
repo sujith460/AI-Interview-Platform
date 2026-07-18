@@ -9,3 +9,18 @@ export async function getQuestionDetails(slug) {
   const { data } = await axiosClient.get(`/api/questions/slug/${slug}/details`);
   return data;
 }
+
+export async function searchQuestions(payload) {
+  const { data } = await axiosClient.post('/api/questions/search', payload);
+  return data;
+}
+
+export async function getAllCompanies() {
+  const { data } = await axiosClient.get('/api/companies');
+  return data;
+}
+
+export async function getAllPatterns() {
+  const { data } = await axiosClient.get('/api/patterns');
+  return data;
+}

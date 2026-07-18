@@ -22,6 +22,52 @@ const LANGUAGE_MAPPING = {
   RUST: { id: 'rust', label: 'Rust' },
 };
 
+// Collapsible Accordion section helper
+function CollapsibleSection({ title, children }) {
+  const [isOpen, setIsOpen] = useState(false);
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white/40 dark:border-white/5 dark:bg-white/[0.01] overflow-hidden shadow-sm">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full flex items-center justify-between px-5 py-4 text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 hover:bg-slate-100/50 dark:hover:bg-white/[0.02] transition-colors"
+      >
+        <span>{title}</span>
+        <svg
+          className={cn(
+            "h-4 w-4 text-slate-400 transition-transform duration-300",
+            isOpen ? "rotate-90 text-violet-500" : ""
+          )}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth="2.5"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+        </svg>
+      </button>
+      <div
+        className={cn(
+          "transition-all duration-300 ease-in-out overflow-hidden border-t border-slate-200/50 dark:border-white/5",
+          isOpen ? "max-h-[500px] p-5 opacity-100" : "max-h-0 p-0 opacity-0 border-t-0"
+        )}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// Strip duplicate Example and Constraint statements from text description
+const cleanDescription = (desc) => {
+  if (!desc) return '';
+  const regex = /(?:Example\s*1|Example:|Examples:|Constraints:)/i;
+  const match = desc.match(regex);
+  if (match) {
+    return desc.substring(0, match.index).trim();
+  }
+  return desc.trim();
+};
+
 export default function PracticeWorkspacePage() {
   const { slug } = useParams();
   const navigate = useNavigate();
@@ -41,17 +87,55 @@ export default function PracticeWorkspacePage() {
   // Editor states
   const [selectedLanguage, setSelectedLanguage] = useState('');
   const [editorCode, setEditorCode] = useState('');
-  const [editorTheme, setEditorTheme] = useState('one-dark-pro');
+  const [editorTheme, setEditorTheme] = useState(() => {
+    return localStorage.getItem('ai-interview-preferred-theme') || 'one-dark-pro';
+  });
   const [isFullscreen, setIsFullscreen] = useState(false);
   
   // Cache of code written for each language
   // Keyed by language string (e.g., 'JAVA', 'PYTHON')
   const [codeCache, setCodeCache] = useState({});
 
-  // Stopwatch states
-  const [time, setTime] = useState(0);
-  const [isTimerRunning, setIsTimerRunning] = useState(false);
+  // Stopwatch states initialized from LocalStorage
+  const [time, setTime] = useState(() => {
+    const isRunning = localStorage.getItem('ai-interview-timer-running') === 'true';
+    const accum = parseInt(localStorage.getItem('ai-interview-timer-accumulated') || '0', 10);
+    if (isRunning) {
+      const startTime = parseInt(localStorage.getItem('ai-interview-timer-start-time') || '0', 10);
+      if (startTime > 0) {
+        const diff = Math.floor((Date.now() - startTime) / 1000);
+        return accum + Math.max(0, diff);
+      }
+    }
+    return accum;
+  });
+
+  const [isTimerRunning, setIsTimerRunning] = useState(() => {
+    return localStorage.getItem('ai-interview-timer-running') === 'true';
+  });
+
   const timerRef = useRef(null);
+
+  // Handle stopwatch interval
+  useEffect(() => {
+    if (isTimerRunning) {
+      timerRef.current = setInterval(() => {
+        const accum = parseInt(localStorage.getItem('ai-interview-timer-accumulated') || '0', 10);
+        const startTime = parseInt(localStorage.getItem('ai-interview-timer-start-time') || '0', 10);
+        if (startTime > 0) {
+          const diff = Math.floor((Date.now() - startTime) / 1000);
+          setTime(accum + Math.max(0, diff));
+        } else {
+          setTime((prev) => prev + 1);
+        }
+      }, 1000);
+    }
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, [isTimerRunning]);
 
   // Console states
   const [consoleActiveTab, setConsoleActiveTab] = useState('testcases');
@@ -65,17 +149,22 @@ export default function PracticeWorkspacePage() {
   // Fetch question details
   const fetchDetails = async () => {
     setIsLoading(true);
+    setQuestion(null); // Clear stale question details state
     setError('');
     try {
       const data = await getQuestionDetails(slug);
       setQuestion(data);
 
       // Populate language templates
-      if (data.languageTemplates && data.languageTemplates.size > 0 || Array.from(data.languageTemplates || []).length > 0) {
+      if (data.languageTemplates && (data.languageTemplates.size > 0 || Array.from(data.languageTemplates || []).length > 0)) {
         const templates = Array.from(data.languageTemplates);
-        // Default to first template
-        const defaultTemplate = templates[0];
+        
+        // Restore globally preferred language
+        const preferredLang = localStorage.getItem('ai-interview-preferred-language');
+        const hasPreferredTemplate = templates.find((temp) => temp.language === preferredLang);
+        const defaultTemplate = hasPreferredTemplate || templates[0];
         const defaultLang = defaultTemplate.language;
+        
         setSelectedLanguage(defaultLang);
         
         // Build initial cache from localStorage or starter code
@@ -178,33 +267,50 @@ export default function PracticeWorkspacePage() {
     };
   }, [editorCode, selectedLanguage]);
 
-  // Stopwatch controls
+  // Stopwatch controls with LocalStorage persistence
   const startTimer = () => {
     if (!isTimerRunning) {
+      const now = Date.now();
+      localStorage.setItem('ai-interview-timer-running', 'true');
+      localStorage.setItem('ai-interview-timer-start-time', now.toString());
+      localStorage.setItem('ai-interview-timer-accumulated', time.toString());
       setIsTimerRunning(true);
-      timerRef.current = setInterval(() => {
-        setTime((prevTime) => prevTime + 1);
-      }, 1000);
     }
   };
 
   const pauseTimer = () => {
-    setIsTimerRunning(false);
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
+    if (isTimerRunning) {
+      const now = Date.now();
+      const startTime = parseInt(localStorage.getItem('ai-interview-timer-start-time') || '0', 10);
+      const accum = parseInt(localStorage.getItem('ai-interview-timer-accumulated') || '0', 10);
+      const diff = startTime > 0 ? Math.floor((now - startTime) / 1000) : 0;
+      const newAccum = accum + Math.max(0, diff);
+
+      localStorage.setItem('ai-interview-timer-running', 'false');
+      localStorage.setItem('ai-interview-timer-accumulated', newAccum.toString());
+      localStorage.removeItem('ai-interview-timer-start-time');
+      
+      setTime(newAccum);
+      setIsTimerRunning(false);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
     }
   };
 
   const resetTimer = () => {
+    localStorage.setItem('ai-interview-timer-running', 'false');
+    localStorage.setItem('ai-interview-timer-accumulated', '0');
+    localStorage.removeItem('ai-interview-timer-start-time');
+    
+    setTime(0);
     setIsTimerRunning(false);
     if (timerRef.current) {
       clearInterval(timerRef.current);
     }
-    setTime(0);
   };
 
   const stopTimer = () => {
-    setIsTimerRunning(false);
     if (timerRef.current) {
       clearInterval(timerRef.current);
     }
@@ -219,6 +325,27 @@ export default function PracticeWorkspacePage() {
       mins.toString().padStart(2, '0'),
       secs.toString().padStart(2, '0'),
     ].join(':');
+  };
+
+  const renderFrequencyBadge = (score) => {
+    if (score === null || score === undefined) return null;
+    let label = 'Low';
+    let badgeClass = 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20';
+    if (score >= 300) {
+      label = 'Very High';
+      badgeClass = 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20';
+    } else if (score >= 150) {
+      label = 'High';
+      badgeClass = 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20';
+    } else if (score >= 50) {
+      label = 'Medium';
+      badgeClass = 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20';
+    }
+    return (
+      <span className={cn("rounded-md px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide border", badgeClass)}>
+        {label}
+      </span>
+    );
   };
 
   // Actions
@@ -239,6 +366,7 @@ export default function PracticeWorkspacePage() {
         [selectedLanguage]: editorCode,
       }));
     }
+    localStorage.setItem('ai-interview-preferred-language', newLang);
     setSelectedLanguage(newLang);
     setEditorCode(codeCache[newLang] || '');
   };
@@ -488,75 +616,44 @@ export default function PracticeWorkspacePage() {
                   {question.frequencyScore && (
                     <>
                       <span>•</span>
-                      <span>Frequency: {question.frequencyScore}%</span>
+                      <span>Freq: </span>
+                      {renderFrequencyBadge(question.frequencyScore)}
                     </>
                   )}
                 </div>
               </div>
 
-              {/* Tag sections */}
-              <div className="flex flex-wrap gap-4 pt-1 border-t border-slate-200/50 dark:border-white/5">
-                {question.companies && question.companies.length > 0 && (
-                  <div className="space-y-1.5">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Target Companies</p>
-                    <div className="flex flex-wrap gap-1">
-                      {Array.from(question.companies).map((c) => (
-                        <span key={c} className="rounded-lg bg-blue-500/5 dark:bg-blue-950/20 px-2.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300 border border-blue-500/10">
-                          {c.charAt(0).toUpperCase() + c.slice(1)}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {question.patterns && question.patterns.length > 0 && (
-                  <div className="space-y-1.5">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">DSA Patterns</p>
-                    <div className="flex flex-wrap gap-1">
-                      {Array.from(question.patterns).map((p) => (
-                        <span key={p} className="rounded-lg bg-violet-500/5 dark:bg-violet-950/20 px-2.5 py-0.5 text-[10px] font-semibold text-violet-700 dark:text-violet-300 border border-violet-500/10">
-                          {p}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
               {/* Description Body */}
               <div className="prose prose-slate dark:prose-invert max-w-none text-sm leading-relaxed text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-sans border-t border-slate-200/50 dark:border-white/5 pt-4">
-                {question.description}
+                {cleanDescription(question.description)}
               </div>
 
               {/* Sample Examples */}
               {sampleTestCasesList.length > 0 && (
                 <div className="space-y-4">
                   <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                    Examples & Test Cases
+                    Examples
                   </h3>
-                  <div className="space-y-4">
+                  <div className="space-y-5">
                     {sampleTestCasesList.map((tc, index) => (
                       <div 
                         key={tc.id || index}
-                        className="rounded-2xl border border-slate-200/60 bg-white/30 p-4 dark:border-white/5 dark:bg-white/[0.01]"
+                        className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm dark:border-white/5 dark:bg-white/[0.01]"
                       >
-                        <p className="text-xs font-bold text-violet-600 dark:text-violet-400 mb-2.5">
-                          Example {index + 1}
+                        <p className="text-xs font-bold text-slate-800 dark:text-slate-200 mb-3">
+                          Example {index + 1}:
                         </p>
-                        <div className="space-y-2 text-xs font-mono">
-                          <div>
-                            <span className="text-slate-400 font-sans">Input:</span>
-                            <pre className="mt-1 p-2 rounded bg-slate-100 dark:bg-black/40 text-slate-800 dark:text-slate-200 overflow-x-auto">
-                              {tc.input}
-                            </pre>
+                        <div className="space-y-3 font-mono text-xs text-slate-600 dark:text-slate-400">
+                          <div className="bg-slate-50 dark:bg-black/30 p-3 rounded-lg border border-slate-200/50 dark:border-white/5">
+                            <span className="font-semibold text-slate-700 dark:text-slate-300">Input: </span>
+                            {tc.input}
                           </div>
-                          <div>
-                            <span className="text-slate-400 font-sans">Output:</span>
-                            <pre className="mt-1 p-2 rounded bg-slate-100 dark:bg-black/40 text-slate-800 dark:text-slate-200 overflow-x-auto">
-                              {tc.expectedOutput}
-                            </pre>
+                          <div className="bg-slate-50 dark:bg-black/30 p-3 rounded-lg border border-slate-200/50 dark:border-white/5">
+                            <span className="font-semibold text-slate-700 dark:text-slate-300">Output: </span>
+                            {tc.expectedOutput}
                           </div>
                           {tc.explanation && (
-                            <div className="pt-1.5 font-sans leading-relaxed text-slate-500 dark:text-slate-400">
+                            <div className="bg-slate-50 dark:bg-black/30 p-3 rounded-lg border border-slate-200/50 dark:border-white/5 font-sans leading-relaxed">
                               <span className="font-semibold text-slate-700 dark:text-slate-300">Explanation: </span>
                               {tc.explanation}
                             </div>
@@ -574,15 +671,42 @@ export default function PracticeWorkspacePage() {
                   <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                     Constraints
                   </h3>
-                  <div className="rounded-xl border border-amber-500/10 bg-amber-500/[0.02] p-4 text-xs font-mono leading-relaxed text-slate-600 dark:text-slate-400">
-                    <ul className="list-disc pl-4 space-y-1">
-                      {question.constraints.split('\n').map((line, idx) => (
-                        <li key={idx} className="marker:text-amber-500/60">{line}</li>
+                  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/5 dark:bg-white/[0.01]">
+                    <ul className="list-disc pl-5 space-y-2 text-xs font-mono text-slate-600 dark:text-slate-400">
+                      {question.constraints.split('\n').filter(line => line.trim()).map((line, idx) => (
+                        <li key={idx} className="marker:text-amber-500/60 leading-relaxed">{line.trim()}</li>
                       ))}
                     </ul>
                   </div>
                 </div>
               )}
+
+              {/* Collapsible Tag sections */}
+              <div className="space-y-4 border-t border-slate-200/50 dark:border-white/5 pt-6">
+                {question.companies && question.companies.length > 0 && (
+                  <CollapsibleSection title="Related Companies">
+                    <div className="flex flex-wrap gap-1.5">
+                      {Array.from(question.companies).sort().map((c) => (
+                        <span key={c} className="rounded-lg bg-blue-500/5 dark:bg-blue-950/20 px-2.5 py-1 text-[10px] font-semibold text-blue-700 dark:text-blue-300 border border-blue-500/10 transition-colors hover:bg-blue-500/10">
+                          {c.charAt(0).toUpperCase() + c.slice(1)}
+                        </span>
+                      ))}
+                    </div>
+                  </CollapsibleSection>
+                )}
+
+                {question.patterns && question.patterns.length > 0 && (
+                  <CollapsibleSection title="DSA Patterns">
+                    <div className="flex flex-wrap gap-1.5">
+                      {Array.from(question.patterns).sort().map((p) => (
+                        <span key={p} className="rounded-lg bg-violet-500/5 dark:bg-violet-950/20 px-2.5 py-1 text-[10px] font-semibold text-violet-700 dark:text-violet-300 border border-violet-500/10 transition-colors hover:bg-violet-500/10">
+                          {p}
+                        </span>
+                      ))}
+                    </div>
+                  </CollapsibleSection>
+                )}
+              </div>
 
             </div>
           </div>
@@ -632,7 +756,11 @@ export default function PracticeWorkspacePage() {
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Theme</label>
                     <select
                       value={editorTheme}
-                      onChange={(e) => setEditorTheme(e.target.value)}
+                      onChange={(e) => {
+                        const newTheme = e.target.value;
+                        setEditorTheme(newTheme);
+                        localStorage.setItem('ai-interview-preferred-theme', newTheme);
+                      }}
                       className="rounded bg-[#20202d] border border-slate-700/60 px-2 py-1 text-xs text-slate-100 outline-none focus:border-violet-500"
                     >
                       <option value="one-dark-pro">One Dark Pro</option>

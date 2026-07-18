@@ -1,39 +1,99 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import Alert from '@/components/ui/alert/Alert';
 import Button from '@/components/ui/button/Button';
 import Card from '@/components/ui/card/Card';
 import Spinner from '@/components/ui/spinner/Spinner';
 import ThemeToggle from '@/components/common/ThemeToggle';
-import { getAllQuestions } from '@/services/practice/practiceService';
+import { searchQuestions, getAllCompanies, getAllPatterns } from '@/services/practice/practiceService';
 import { cn } from '@/utils/helpers/cn';
 
 export default function PracticeListPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // URL state synchronization
+  const page = parseInt(searchParams.get('page') || '1', 10);
+  const size = parseInt(searchParams.get('size') || '20', 10);
+  const search = searchParams.get('search') || '';
+  const difficulty = searchParams.get('difficulty') || 'ALL';
+  const company = searchParams.get('company') || 'ALL';
+  const pattern = searchParams.get('pattern') || 'ALL';
+
+  // Filters catalog state
+  const [allCompanies, setAllCompanies] = useState([]);
+  const [allPatterns, setAllPatterns] = useState([]);
+  const [companiesLoaded, setCompaniesLoaded] = useState(false);
+  const [patternsLoaded, setPatternsLoaded] = useState(false);
+
+  // Questions and pagination states
   const [questions, setQuestions] = useState([]);
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalElements, setTotalElements] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Filters state
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedDifficulty, setSelectedDifficulty] = useState('ALL');
-  const [selectedCompany, setSelectedCompany] = useState('ALL');
-  const [selectedPattern, setSelectedPattern] = useState('ALL');
+  // Local state for search query to debounce inputs
+  const [localSearch, setLocalSearch] = useState(search);
 
+  // Load companies and patterns lists on mount
+  useEffect(() => {
+    const loadFilters = async () => {
+      try {
+        const [compData, patData] = await Promise.all([
+          getAllCompanies(),
+          getAllPatterns()
+        ]);
+        setAllCompanies(compData || []);
+        setAllPatterns(patData || []);
+      } catch (err) {
+        console.error('Failed to load companies or patterns:', err);
+      } finally {
+        setCompaniesLoaded(true);
+        setPatternsLoaded(true);
+      }
+    };
+    loadFilters();
+  }, []);
+
+  // Sync search input when URL changes (e.g. back navigation)
+  useEffect(() => {
+    setLocalSearch(search);
+  }, [search]);
+
+  // Fetch questions from backend
   const fetchQuestionsList = async () => {
     setIsLoading(true);
     setError('');
     try {
-      const data = await getAllQuestions();
-      console.log('API RESPONSE RAW DATA:', data);
-      let extractedQuestions = [];
-      if (Array.isArray(data)) {
-        extractedQuestions = data;
-      } else if (data && Array.isArray(data.content)) {
-        extractedQuestions = data.content;
+      // Find matching IDs from string names for the backend API search DTO
+      let companyIds = null;
+      if (company !== 'ALL') {
+        const found = allCompanies.find((c) => c.name.toLowerCase() === company.toLowerCase());
+        companyIds = found ? [found.id] : [];
       }
-      console.log('EXTRACTED QUESTIONS:', extractedQuestions);
-      setQuestions(extractedQuestions);
+
+      let patternIds = null;
+      if (pattern !== 'ALL') {
+        const found = allPatterns.find((p) => p.name.toLowerCase() === pattern.toLowerCase());
+        patternIds = found ? [found.id] : [];
+      }
+
+      const payload = {
+        page: page - 1, // 0-based page in Spring Boot
+        size: size,
+        search: search || null,
+        difficulty: difficulty !== 'ALL' ? difficulty : null,
+        companyIds: companyIds,
+        patternIds: patternIds,
+        sortBy: 'CREATED_AT',
+        sortDirection: 'DESC'
+      };
+
+      const data = await searchQuestions(payload);
+      setQuestions(data.content || []);
+      setTotalPages(data.totalPages || 0);
+      setTotalElements(data.totalElements || 0);
     } catch (err) {
       console.error('API FETCH ERROR:', err);
       setError(err?.response?.data?.message || 'Failed to load coding questions. Please try again.');
@@ -42,48 +102,72 @@ export default function PracticeListPage() {
     }
   };
 
+  // Trigger search on parameter/filter change
   useEffect(() => {
-    fetchQuestionsList();
-  }, []);
+    if (companiesLoaded && patternsLoaded) {
+      fetchQuestionsList();
+    }
+  }, [page, size, search, difficulty, company, pattern, companiesLoaded, patternsLoaded]);
 
-  // Compute all unique companies and patterns dynamically for filter dropdowns
-  const { uniqueCompanies, uniquePatterns } = useMemo(() => {
-    const companiesSet = new Set();
-    const patternsSet = new Set();
+  // Debounced search trigger
+  useEffect(() => {
+    const delayDebounce = setTimeout(() => {
+      if (localSearch !== search) {
+        updateFilters({ search: localSearch });
+      }
+    }, 450);
+    return () => clearTimeout(delayDebounce);
+  }, [localSearch]);
+
+  // Helper to update query parameters in URL
+  const updateFilters = (newFilters) => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set('page', '1'); // Reset page to 1 on filter update
     
-    questions.forEach((q) => {
-      if (q.companies) {
-        q.companies.forEach((c) => companiesSet.add(c));
-      }
-      if (q.patterns) {
-        q.patterns.forEach((p) => patternsSet.add(p));
+    Object.entries(newFilters).forEach(([key, val]) => {
+      if (val === 'ALL' || val === '') {
+        nextParams.delete(key);
+      } else {
+        nextParams.set(key, val);
       }
     });
+    setSearchParams(nextParams);
+  };
 
-    return {
-      uniqueCompanies: Array.from(companiesSet).sort(),
-      uniquePatterns: Array.from(patternsSet).sort(),
-    };
-  }, [questions]);
+  const handlePageChange = (newPage) => {
+    if (newPage < 1 || newPage > totalPages) return;
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set('page', newPage.toString());
+    setSearchParams(nextParams);
+  };
 
-  // Filtered questions
-  const filteredQuestions = useMemo(() => {
-    return questions.filter((q) => {
-      const matchesSearch = q.title?.toLowerCase().includes(searchQuery.toLowerCase()) || 
-        q.description?.toLowerCase().includes(searchQuery.toLowerCase());
-      
-      const matchesDifficulty = selectedDifficulty === 'ALL' || 
-        q.difficulty === selectedDifficulty;
-      
-      const matchesCompany = selectedCompany === 'ALL' || 
-        (q.companies && q.companies.includes(selectedCompany));
-      
-      const matchesPattern = selectedPattern === 'ALL' || 
-        (q.patterns && q.patterns.includes(selectedPattern));
+  const handleSizeChange = (newSize) => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set('page', '1');
+    nextParams.set('size', newSize.toString());
+    setSearchParams(nextParams);
+  };
 
-      return matchesSearch && matchesDifficulty && matchesCompany && matchesPattern;
-    });
-  }, [questions, searchQuery, selectedDifficulty, selectedCompany, selectedPattern]);
+  const renderFrequencyBadge = (score) => {
+    if (score === null || score === undefined) return null;
+    let label = 'Low';
+    let badgeClass = 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20';
+    if (score >= 300) {
+      label = 'Very High';
+      badgeClass = 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20';
+    } else if (score >= 150) {
+      label = 'High';
+      badgeClass = 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20';
+    } else if (score >= 50) {
+      label = 'Medium';
+      badgeClass = 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20';
+    }
+    return (
+      <span className={cn("rounded px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide border", badgeClass)}>
+        {label}
+      </span>
+    );
+  };
 
   return (
     <div className="register-grid relative min-h-screen overflow-hidden bg-slate-50 text-slate-900 transition-colors duration-300 dark:bg-[#070714] dark:text-slate-100">
@@ -138,8 +222,8 @@ export default function PracticeListPage() {
                 <input
                   type="text"
                   placeholder="Search by title..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  value={localSearch}
+                  onChange={(e) => setLocalSearch(e.target.value)}
                   className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm text-slate-900 outline-none transition duration-200 focus:border-violet-500 dark:border-white/5 dark:bg-[#0c0c1e] dark:text-slate-100 dark:focus:border-violet-500"
                 />
               </div>
@@ -151,8 +235,8 @@ export default function PracticeListPage() {
                 Difficulty
               </label>
               <select
-                value={selectedDifficulty}
-                onChange={(e) => setSelectedDifficulty(e.target.value)}
+                value={difficulty}
+                onChange={(e) => updateFilters({ difficulty: e.target.value })}
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition duration-200 focus:border-violet-500 dark:border-white/5 dark:bg-[#0c0c1e] dark:text-slate-100 dark:focus:border-violet-500"
               >
                 <option value="ALL">All Difficulties</option>
@@ -168,14 +252,14 @@ export default function PracticeListPage() {
                 Company
               </label>
               <select
-                value={selectedCompany}
-                onChange={(e) => setSelectedCompany(e.target.value)}
+                value={company}
+                onChange={(e) => updateFilters({ company: e.target.value })}
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition duration-200 focus:border-violet-500 dark:border-white/5 dark:bg-[#0c0c1e] dark:text-slate-100 dark:focus:border-violet-500"
               >
                 <option value="ALL">All Companies</option>
-                {uniqueCompanies.map((c) => (
-                  <option key={c} value={c}>
-                    {c.charAt(0).toUpperCase() + c.slice(1)}
+                {allCompanies.map((c) => (
+                  <option key={c.id} value={c.name}>
+                    {c.name.charAt(0).toUpperCase() + c.name.slice(1)}
                   </option>
                 ))}
               </select>
@@ -187,14 +271,14 @@ export default function PracticeListPage() {
                 DSA Pattern
               </label>
               <select
-                value={selectedPattern}
-                onChange={(e) => setSelectedPattern(e.target.value)}
+                value={pattern}
+                onChange={(e) => updateFilters({ pattern: e.target.value })}
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition duration-200 focus:border-violet-500 dark:border-white/5 dark:bg-[#0c0c1e] dark:text-slate-100 dark:focus:border-violet-500"
               >
                 <option value="ALL">All Patterns</option>
-                {uniquePatterns.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
+                {allPatterns.map((p) => (
+                  <option key={p.id} value={p.name}>
+                    {p.name}
                   </option>
                 ))}
               </select>
@@ -206,8 +290,8 @@ export default function PracticeListPage() {
         {isLoading ? (
           <div className="space-y-4">
             {[1, 2, 3].map((n) => (
-              <Card key={n} className="p-6 border border-slate-200/60 dark:border-white/5">
-                <div className="flex animate-pulse justify-between gap-4">
+              <Card key={n} className="p-6 border border-slate-200/60 dark:border-white/5 animate-pulse">
+                <div className="flex justify-between gap-4">
                   <div className="flex-1 space-y-3">
                     <div className="h-5 w-1/3 rounded bg-slate-200 dark:bg-slate-800" />
                     <div className="h-4 w-1/2 rounded bg-slate-200 dark:bg-slate-800" />
@@ -228,21 +312,16 @@ export default function PracticeListPage() {
               Try again
             </Button>
           </div>
-        ) : filteredQuestions.length === 0 ? (
+        ) : questions.length === 0 ? (
           <Card className="p-12 text-center border border-dashed border-slate-200 dark:border-white/5">
             <p className="text-slate-500 dark:text-slate-400">No questions found matching your filters.</p>
-            <Button variant="outline" className="mt-4" onClick={() => {
-              setSearchQuery('');
-              setSelectedDifficulty('ALL');
-              setSelectedCompany('ALL');
-              setSelectedPattern('ALL');
-            }}>
+            <Button variant="outline" className="mt-4" onClick={() => setSearchParams({})}>
               Clear Filters
             </Button>
           </Card>
         ) : (
           <div className="space-y-4">
-            {filteredQuestions.map((q) => {
+            {questions.map((q) => {
               const diffText = q.difficulty?.charAt(0) + q.difficulty?.slice(1).toLowerCase();
               return (
                 <div
@@ -283,7 +362,8 @@ export default function PracticeListPage() {
                         {q.frequencyScore && (
                           <>
                             <span>•</span>
-                            <span>Frequency: {q.frequencyScore}%</span>
+                            <span>Freq: </span>
+                            {renderFrequencyBadge(q.frequencyScore)}
                           </>
                         )}
                       </div>
@@ -298,7 +378,7 @@ export default function PracticeListPage() {
                             {pat}
                           </span>
                         ))}
-                        {q.companies && q.companies.slice(0, 3).map((comp) => (
+                        {q.companies && Array.from(q.companies).sort().slice(0, 3).map((comp) => (
                           <span
                             key={comp}
                             className="rounded-lg bg-blue-500/5 dark:bg-blue-950/20 px-2.5 py-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-300 border border-blue-500/10"
@@ -332,6 +412,136 @@ export default function PracticeListPage() {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* Pagination controls */}
+        {!isLoading && !error && totalPages > 1 && (
+          <div className="flex flex-col items-center justify-between gap-4 border-t border-slate-200/60 pt-6 pb-8 dark:border-white/5 sm:flex-row">
+            {/* Showing details */}
+            <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+              Showing <span className="font-semibold text-slate-800 dark:text-slate-200">{((page - 1) * size) + 1}</span>–
+              <span className="font-semibold text-slate-800 dark:text-slate-200">{Math.min(page * size, totalElements)}</span> of{' '}
+              <span className="font-semibold text-slate-800 dark:text-slate-200">{totalElements}</span> Questions
+            </div>
+
+            {/* Desktop/Mobile buttons container */}
+            <div className="flex items-center gap-4">
+              
+              {/* Page Size selector */}
+              <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 pl-2">
+                <span>Per page:</span>
+                <select
+                  value={size}
+                  onChange={(e) => handleSizeChange(e.target.value)}
+                  className="rounded-lg border border-slate-200 bg-white px-2 py-1 outline-none dark:border-white/5 dark:bg-[#0c0c1e] text-slate-800 dark:text-slate-200 focus:border-violet-500"
+                >
+                  <option value="10">10</option>
+                  <option value="20">20</option>
+                  <option value="50">50</option>
+                  <option value="100">100</option>
+                </select>
+              </div>
+
+              {/* Mobile UI (hidden on sm up) */}
+              <div className="flex items-center gap-2 sm:hidden">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePageChange(page - 1)}
+                  disabled={page === 1}
+                  className="h-8 text-xs font-semibold"
+                >
+                  Previous
+                </Button>
+                <span className="text-xs text-slate-500 dark:text-slate-400 font-semibold">
+                  Page {page} of {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePageChange(page + 1)}
+                  disabled={page === totalPages}
+                  className="h-8 text-xs font-semibold"
+                >
+                  Next
+                </Button>
+              </div>
+
+              {/* Desktop UI (hidden on mobile) */}
+              <div className="hidden items-center gap-1 sm:flex">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePageChange(1)}
+                  disabled={page === 1}
+                  className="h-8 px-2 text-xs font-semibold"
+                  title="First Page"
+                >
+                  &lt;&lt;
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePageChange(page - 1)}
+                  disabled={page === 1}
+                  className="h-8 px-2 text-xs font-semibold"
+                  title="Previous Page"
+                >
+                  &lt;
+                </Button>
+                
+                {/* Page Numbers */}
+                {Array.from({ length: Math.min(5, totalPages) }, (_, index) => {
+                  let pageNumber = page;
+                  if (page <= 3) {
+                    pageNumber = index + 1;
+                  } else if (page >= totalPages - 2) {
+                    pageNumber = totalPages - 4 + index;
+                  } else {
+                    pageNumber = page - 2 + index;
+                  }
+                  
+                  if (pageNumber < 1 || pageNumber > totalPages) return null;
+
+                  return (
+                    <Button
+                      key={pageNumber}
+                      variant={page === pageNumber ? 'primary' : 'outline'}
+                      size="sm"
+                      onClick={() => handlePageChange(pageNumber)}
+                      className={cn(
+                        "h-8 w-8 p-0 font-mono text-xs font-bold",
+                        page === pageNumber ? "bg-violet-600 hover:bg-violet-700 text-white" : ""
+                      )}
+                    >
+                      {pageNumber}
+                    </Button>
+                  );
+                })}
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePageChange(page + 1)}
+                  disabled={page === totalPages}
+                  className="h-8 px-2 text-xs font-semibold"
+                  title="Next Page"
+                >
+                  &gt;
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePageChange(totalPages)}
+                  disabled={page === totalPages}
+                  className="h-8 px-2 text-xs font-semibold"
+                  title="Last Page"
+                >
+                  &gt;&gt;
+                </Button>
+              </div>
+            </div>
           </div>
         )}
       </main>
