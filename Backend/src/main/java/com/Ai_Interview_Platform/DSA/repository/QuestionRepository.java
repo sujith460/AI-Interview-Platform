@@ -24,5 +24,6 @@ public interface QuestionRepository extends
             "testCases"
     })
     Optional<Question> findDetailsBySlug(String slug);
+    Optional<Question> findDetailsById(Long id);
 
 }

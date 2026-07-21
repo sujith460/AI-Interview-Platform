@@ -24,3 +24,13 @@ export async function getAllPatterns() {
   const { data } = await axiosClient.get('/api/patterns');
   return data;
 }
+
+export async function runCode(payload) {
+  const { data } = await axiosClient.post('/api/run', payload);
+  return data;
+}
+
+export async function submitCode(payload) {
+  const { data } = await axiosClient.post('/api/submit', payload);
+  return data;
+}

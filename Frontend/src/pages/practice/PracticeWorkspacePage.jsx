@@ -5,7 +5,7 @@ import Alert from '@/components/ui/alert/Alert';
 import Button from '@/components/ui/button/Button';
 import Spinner from '@/components/ui/spinner/Spinner';
 import ThemeToggle from '@/components/common/ThemeToggle';
-import { getQuestionDetails } from '@/services/practice/practiceService';
+import { getQuestionDetails, runCode, submitCode } from '@/services/practice/practiceService';
 import { cn } from '@/utils/helpers/cn';
 
 // Language mapping from Java enum strings to Monaco strings and user-friendly labels
@@ -91,7 +91,7 @@ export default function PracticeWorkspacePage() {
     return localStorage.getItem('ai-interview-preferred-theme') || 'one-dark-pro';
   });
   const [isFullscreen, setIsFullscreen] = useState(false);
-  
+
   // Cache of code written for each language
   // Keyed by language string (e.g., 'JAVA', 'PYTHON')
   const [codeCache, setCodeCache] = useState({});
@@ -142,6 +142,11 @@ export default function PracticeWorkspacePage() {
   const [consoleOutput, setConsoleOutput] = useState('');
   const [isExecuting, setIsExecuting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [runResults, setRunResults] = useState(null);
+  const [runError, setRunError] = useState('');
+  const [selectedResultCaseIdx, setSelectedResultCaseIdx] = useState(0);
+  const [submitResults, setSubmitResults] = useState(null);
+  const [submitError, setSubmitError] = useState('');
 
   // Monaco Editor Ref
   const editorRef = useRef(null);
@@ -151,6 +156,8 @@ export default function PracticeWorkspacePage() {
     setIsLoading(true);
     setQuestion(null); // Clear stale question details state
     setError('');
+    setRunResults(null);
+    setSubmitResults(null);
     try {
       const data = await getQuestionDetails(slug);
       setQuestion(data);
@@ -158,15 +165,15 @@ export default function PracticeWorkspacePage() {
       // Populate language templates
       if (data.languageTemplates && (data.languageTemplates.size > 0 || Array.from(data.languageTemplates || []).length > 0)) {
         const templates = Array.from(data.languageTemplates);
-        
+
         // Restore globally preferred language
         const preferredLang = localStorage.getItem('ai-interview-preferred-language');
         const hasPreferredTemplate = templates.find((temp) => temp.language === preferredLang);
         const defaultTemplate = hasPreferredTemplate || templates[0];
         const defaultLang = defaultTemplate.language;
-        
+
         setSelectedLanguage(defaultLang);
-        
+
         // Build initial cache from localStorage or starter code
         const initialCache = {};
         templates.forEach((temp) => {
@@ -174,7 +181,7 @@ export default function PracticeWorkspacePage() {
           initialCache[temp.language] = savedCode || temp.starterCode || '';
         });
         setCodeCache(initialCache);
-        
+
         // Load initial code
         setEditorCode(initialCache[defaultLang] || '');
       }
@@ -246,7 +253,10 @@ export default function PracticeWorkspacePage() {
     };
   }, [isResizingWidth, isResizingHeight]);
 
-  // Keyboard shortcuts (Ctrl + S to save, Ctrl + Enter to run)
+  // Keyboard shortcuts
+  // Ctrl + S  → Save locally
+  // Ctrl + '  → Run Code
+  // Ctrl + Enter → Submit Code
   useEffect(() => {
     const handleKeyDown = (e) => {
       // Ctrl + S
@@ -254,10 +264,15 @@ export default function PracticeWorkspacePage() {
         e.preventDefault();
         saveCodeLocally();
       }
-      // Ctrl + Enter
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      // Ctrl + ' (backtick-apostrophe key)
+      if ((e.ctrlKey || e.metaKey) && e.key === "'") {
         e.preventDefault();
         handleRunCode();
+      }
+      // Ctrl + Enter → Submit
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        handleSubmitCode();
       }
     };
 
@@ -289,7 +304,7 @@ export default function PracticeWorkspacePage() {
       localStorage.setItem('ai-interview-timer-running', 'false');
       localStorage.setItem('ai-interview-timer-accumulated', newAccum.toString());
       localStorage.removeItem('ai-interview-timer-start-time');
-      
+
       setTime(newAccum);
       setIsTimerRunning(false);
       if (timerRef.current) {
@@ -302,7 +317,7 @@ export default function PracticeWorkspacePage() {
     localStorage.setItem('ai-interview-timer-running', 'false');
     localStorage.setItem('ai-interview-timer-accumulated', '0');
     localStorage.removeItem('ai-interview-timer-start-time');
-    
+
     setTime(0);
     setIsTimerRunning(false);
     if (timerRef.current) {
@@ -353,8 +368,6 @@ export default function PracticeWorkspacePage() {
     if (slug && selectedLanguage) {
       localStorage.setItem(`practice_code_${slug}_${selectedLanguage}`, editorCode);
       setConsoleOutput(`[SYSTEM] Save Successful.\nSaved at: ${new Date().toLocaleTimeString()}\nLanguage: ${selectedLanguage}`);
-      setConsoleActiveTab('output');
-      setIsConsoleCollapsed(false);
     }
   };
 
@@ -369,42 +382,66 @@ export default function PracticeWorkspacePage() {
     localStorage.setItem('ai-interview-preferred-language', newLang);
     setSelectedLanguage(newLang);
     setEditorCode(codeCache[newLang] || '');
+    setRunResults(null);
+    setRunError('');
+    setSubmitResults(null);
+    setSubmitError('');
   };
 
-  const handleRunCode = () => {
+  const handleRunCode = async () => {
     if (isExecuting || isSubmitting) return;
     setIsExecuting(true);
     setIsConsoleCollapsed(false);
-    setConsoleActiveTab('output');
-    setConsoleOutput('[RUN] Initiating code validation...\n[RUN] Building dependency graph...\n[RUN] Compiling source code...');
-    
-    setTimeout(() => {
-      setConsoleOutput(
-        `[RUN] Compilation successful.\n\n` +
-        `[INFO] Code Execution API is not implemented yet.\n` +
-        `Below are the mock verification cases corresponding to your details configuration:\n\n` +
-        JSON.stringify(Array.from(question.sampleTestCases || []), null, 2) +
-        `\n\n[STATUS] Execution finished. (Mocked Output)`
-      );
+    setConsoleActiveTab('testcases');
+    setRunResults(null);
+    setRunError('');
+    setSelectedResultCaseIdx(0);
+
+    try {
+      const response = await runCode({
+        questionId: question.id,
+        language: selectedLanguage,
+        code: editorCode
+      });
+
+      if (response.testCaseResults && response.testCaseResults.length > 0) {
+        setRunResults(response.testCaseResults);
+      } else {
+        setRunError(response.output || response.error || 'No sample test cases configured for this question.');
+      }
+    } catch (err) {
+      setRunError(err?.response?.data?.message || err?.message || 'Failed to execute code.');
+    } finally {
       setIsExecuting(false);
-    }, 1500);
+    }
   };
 
-  const handleSubmitCode = () => {
+  const handleSubmitCode = async () => {
     if (isExecuting || isSubmitting) return;
     setIsSubmitting(true);
     setIsConsoleCollapsed(false);
-    setConsoleActiveTab('output');
-    setConsoleOutput('[SUBMIT] Registering submission in dashboard...\n[SUBMIT] Transferring code bundle to tester sandbox...');
+    setConsoleActiveTab('submission');
+    setSubmitResults(null);
+    setSubmitError('');
 
-    setTimeout(() => {
-      setConsoleOutput(
-        `[ERROR] Submission API not implemented.\n\n` +
-        `Stopwatch is kept running so you can continue working on the challenge.\n` +
-        `Elapsed solving time: ${formatTime(time)}`
-      );
+    try {
+      const response = await submitCode({
+        questionId: question.id,
+        language: selectedLanguage,
+        code: editorCode
+      });
+
+      setSubmitResults(response);
+
+      // ✅ Freeze timer on accepted submission
+      if (response && response.success) {
+        pauseTimer();
+      }
+    } catch (err) {
+      setSubmitError(err?.response?.data?.message || err?.message || 'Failed to submit code.');
+    } finally {
       setIsSubmitting(false);
-    }, 1800);
+    }
   };
 
   // Define themes inside Monaco
@@ -577,9 +614,9 @@ export default function PracticeWorkspacePage() {
         </div>
       ) : (
         <div className="flex flex-1 overflow-hidden relative">
-          
+
           {/* Left Panel: Description */}
-          <div 
+          <div
             className="flex flex-col overflow-y-auto border-r border-slate-200/60 dark:border-white/5 bg-slate-50 dark:bg-[#070714] relative"
             style={{ width: `${leftWidth}%` }}
           >
@@ -636,7 +673,7 @@ export default function PracticeWorkspacePage() {
                   </h3>
                   <div className="space-y-5">
                     {sampleTestCasesList.map((tc, index) => (
-                      <div 
+                      <div
                         key={tc.id || index}
                         className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm dark:border-white/5 dark:bg-white/[0.01]"
                       >
@@ -712,7 +749,7 @@ export default function PracticeWorkspacePage() {
           </div>
 
           {/* Width Draggable Split Resizer handle */}
-          <div 
+          <div
             className={cn(
               "w-[5px] cursor-col-resize hover:bg-violet-500/80 bg-slate-200 dark:bg-white/5 transition-colors shrink-0 h-full relative z-30",
               isResizingWidth && "bg-violet-500"
@@ -722,9 +759,9 @@ export default function PracticeWorkspacePage() {
 
           {/* Right Panel: Workspace + Console */}
           <div className="flex flex-1 flex-col overflow-hidden relative">
-            
+
             {/* Editor Workspace Container */}
-            <div 
+            <div
               className={cn(
                 "flex flex-col bg-[#1e1e1e] overflow-hidden relative",
                 isFullscreen ? "fixed inset-0 z-50 w-screen h-screen" : ""
@@ -733,7 +770,7 @@ export default function PracticeWorkspacePage() {
             >
               {/* Toolbar */}
               <div className="flex items-center justify-between gap-3 px-4 py-2 border-b border-[#2d2d3a] bg-[#14141e] text-slate-200 shrink-0 select-none">
-                
+
                 <div className="flex items-center gap-3">
                   {/* Language Selector */}
                   <div className="flex items-center gap-1.5">
@@ -774,60 +811,151 @@ export default function PracticeWorkspacePage() {
                   </div>
                 </div>
 
-                {/* Stopwatch widget */}
-                <div className="flex items-center gap-2 rounded-lg bg-[#20202d] px-3 py-1 text-xs border border-slate-700/60">
-                  <span className="font-mono text-violet-400 font-semibold">{formatTime(time)}</span>
-                  <div className="flex items-center gap-1.5 border-l border-slate-700/50 pl-2">
+                {/* ─── Premium Glassmorphic Stopwatch ─── */}
+                <div className={cn(
+                  "flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs border backdrop-blur-sm transition-all duration-500",
+                  isTimerRunning
+                    ? "bg-gradient-to-r from-violet-900/40 to-purple-900/30 border-violet-500/30 shadow-[0_0_12px_-4px_rgba(139,92,246,0.5)]"
+                    : "bg-[#1a1a2e]/80 border-slate-700/40"
+                )}>
+                  {/* Clock Icon */}
+                  <svg
+                    className={cn(
+                      "h-3.5 w-3.5 shrink-0 transition-colors duration-300",
+                      isTimerRunning ? "text-violet-400" : "text-slate-500"
+                    )}
+                    fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"
+                  >
+                    <circle cx="12" cy="12" r="9" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 7v5l3 3" />
+                  </svg>
+
+                  {/* Time display */}
+                  <span className={cn(
+                    "font-mono font-bold tracking-widest tabular-nums transition-colors duration-300",
+                    isTimerRunning ? "text-violet-300" : "text-slate-400"
+                  )}>
+                    {formatTime(time)}
+                  </span>
+
+                  {/* Divider */}
+                  <div className="w-px h-4 bg-slate-700/60" />
+
+                  {/* Timer controls */}
+                  <div className="flex items-center gap-1">
                     {isTimerRunning ? (
-                      <button onClick={pauseTimer} title="Pause Timer" className="text-slate-400 hover:text-slate-200">
-                        ⏸
+                      <button
+                        onClick={pauseTimer}
+                        title="Pause Timer"
+                        className="flex items-center justify-center w-5 h-5 rounded-md bg-violet-500/10 hover:bg-violet-500/25 text-violet-400 hover:text-violet-200 transition-all duration-150 active:scale-90"
+                      >
+                        <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
+                          <rect x="5" y="4" width="4" height="16" rx="1" />
+                          <rect x="15" y="4" width="4" height="16" rx="1" />
+                        </svg>
                       </button>
                     ) : (
-                      <button onClick={startTimer} title="Start Timer" className="text-emerald-400 hover:text-emerald-300">
-                        ▶
+                      <button
+                        onClick={startTimer}
+                        title="Start Timer"
+                        className="flex items-center justify-center w-5 h-5 rounded-md bg-emerald-500/10 hover:bg-emerald-500/25 text-emerald-400 hover:text-emerald-200 transition-all duration-150 active:scale-90"
+                      >
+                        <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M8 5v14l11-7z" />
+                        </svg>
                       </button>
                     )}
-                    <button onClick={resetTimer} title="Reset Timer" className="text-rose-400 hover:text-rose-300">
-                      ⟲
+                    <button
+                      onClick={resetTimer}
+                      title="Reset Timer"
+                      className="flex items-center justify-center w-5 h-5 rounded-md bg-rose-500/10 hover:bg-rose-500/25 text-rose-400 hover:text-rose-200 transition-all duration-150 active:scale-90"
+                    >
+                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+                      </svg>
                     </button>
                   </div>
                 </div>
 
-                {/* Action controls */}
+                {/* ─── Action Controls ─── */}
                 <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 border-slate-700 hover:bg-[#20202d] text-slate-200"
+
+                  {/* Run Code Button — glassmorphic green tint */}
+                  <button
                     onClick={handleRunCode}
                     disabled={isExecuting || isSubmitting}
-                    isLoading={isExecuting}
+                    title="Run Code (Ctrl + ')"
+                    className={cn(
+                      "relative group flex items-center gap-1.5 px-3.5 h-8 rounded-xl text-xs font-bold border transition-all duration-200 select-none overflow-hidden",
+                      isExecuting || isSubmitting
+                        ? "cursor-not-allowed opacity-50 bg-[#1a1a2e] border-slate-700/40 text-slate-500"
+                        : "bg-gradient-to-r from-emerald-900/30 to-teal-900/20 border-emerald-500/30 text-emerald-300 hover:from-emerald-900/50 hover:to-teal-900/40 hover:border-emerald-400/50 hover:text-emerald-200 hover:shadow-[0_0_14px_-4px_rgba(52,211,153,0.5)] active:scale-[0.97]"
+                    )}
                   >
-                    {isExecuting ? 'Running...' : 'Run Code'}
-                  </Button>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    className="h-8 bg-violet-600 hover:bg-violet-700 border-none text-white shadow-lg"
+                    {/* Shimmer on hover */}
+                    {!(isExecuting || isSubmitting) && (
+                      <span className="absolute inset-0 -translate-x-full group-hover:translate-x-full bg-gradient-to-r from-transparent via-white/5 to-transparent transition-transform duration-500 ease-in-out pointer-events-none" />
+                    )}
+                    {isExecuting ? (
+                      <>
+                        <Spinner className="h-3 w-3 border-[2px] border-emerald-700/40 border-t-emerald-400" />
+                        <span>Running…</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
+                        </svg>
+                        <span>Run</span>
+
+                      </>
+                    )}
+                  </button>
+
+                  {/* Submit Button — glassmorphic violet */}
+                  <button
                     onClick={handleSubmitCode}
                     disabled={isExecuting || isSubmitting}
-                    isLoading={isSubmitting}
+                    title="Submit"
+                    className={cn(
+                      "relative group flex items-center gap-1.5 px-3.5 h-8 rounded-xl text-xs font-bold border transition-all duration-200 select-none overflow-hidden",
+                      isExecuting || isSubmitting
+                        ? "cursor-not-allowed opacity-50 bg-[#1a1a2e] border-slate-700/40 text-slate-500"
+                        : "bg-gradient-to-r from-violet-700/40 to-purple-700/30 border-violet-500/40 text-violet-200 hover:from-violet-600/50 hover:to-purple-600/40 hover:border-violet-400/60 hover:text-white hover:shadow-[0_0_18px_-4px_rgba(139,92,246,0.65)] active:scale-[0.97]"
+                    )}
                   >
-                    {isSubmitting ? 'Submitting...' : 'Submit'}
-                  </Button>
+                    {/* Shimmer on hover */}
+                    {!(isExecuting || isSubmitting) && (
+                      <span className="absolute inset-0 -translate-x-full group-hover:translate-x-full bg-gradient-to-r from-transparent via-white/5 to-transparent transition-transform duration-500 ease-in-out pointer-events-none" />
+                    )}
+                    {isSubmitting ? (
+                      <>
+                        <Spinner className="h-3 w-3 border-[2px] border-violet-700/40 border-t-violet-300" />
+                        <span>Submitting…</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                        </svg>
+                        <span>Submit</span>
+
+                      </>
+                    )}
+                  </button>
 
                   {/* Fullscreen Toggle */}
                   <button
                     onClick={() => setIsFullscreen(!isFullscreen)}
-                    className="p-1 rounded hover:bg-[#20202d] text-slate-400 hover:text-slate-200 focus:outline-none"
+                    className="flex items-center justify-center w-8 h-8 rounded-xl border border-slate-700/40 bg-[#1a1a2e]/80 hover:bg-[#20202d] text-slate-400 hover:text-slate-200 hover:border-slate-600/60 focus:outline-none transition-all duration-150 active:scale-90"
                     title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
                   >
                     {isFullscreen ? (
-                      <svg className="h-4.5 w-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9 3 3m12 6V4.5M15 9h4.5M15 9l6-6M9 15v4.5M9 15H4.5M9 15l-6 6m12-6v4.5M15 15h4.5M15 15l6 6" />
                       </svg>
                     ) : (
-                      <svg className="h-4.5 w-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
                       </svg>
                     )}
@@ -864,7 +992,7 @@ export default function PracticeWorkspacePage() {
 
             {/* Height Draggable Split Resizer handle */}
             {!isFullscreen && (
-              <div 
+              <div
                 className={cn(
                   "h-[5px] cursor-row-resize hover:bg-violet-500/80 bg-slate-200 dark:bg-white/5 transition-colors shrink-0 w-full relative z-30",
                   isResizingHeight && "bg-violet-500"
@@ -875,7 +1003,7 @@ export default function PracticeWorkspacePage() {
 
             {/* Bottom Console Drawer */}
             {!isFullscreen && (
-              <div 
+              <div
                 className="flex flex-col bg-[#14141e] border-t border-[#2d2d3a] text-slate-300 relative z-10 shrink-0 overflow-hidden"
                 style={{ height: isConsoleCollapsed ? '32px' : `${consoleHeight}%` }}
               >
@@ -902,24 +1030,17 @@ export default function PracticeWorkspacePage() {
                       >
                         Test Cases
                       </button>
-                      <button
-                        onClick={() => setConsoleActiveTab('output')}
-                        className={cn(
-                          "px-2.5 py-1 rounded transition-colors font-semibold",
-                          consoleActiveTab === 'output' ? "bg-[#20202d] text-violet-400 border border-violet-500/20" : "text-slate-400 hover:text-slate-200"
-                        )}
-                      >
-                        Output
-                      </button>
-                      <button
-                        onClick={() => setConsoleActiveTab('details')}
-                        className={cn(
-                          "px-2.5 py-1 rounded transition-colors font-semibold",
-                          consoleActiveTab === 'details' ? "bg-[#20202d] text-violet-400 border border-violet-500/20" : "text-slate-400 hover:text-slate-200"
-                        )}
-                      >
-                        Execution Details
-                      </button>
+                      {(submitResults || submitError || isSubmitting) && (
+                        <button
+                          onClick={() => setConsoleActiveTab('submission')}
+                          className={cn(
+                            "px-2.5 py-1 rounded transition-colors font-semibold",
+                            consoleActiveTab === 'submission' ? "bg-[#20202d] text-violet-400 border border-violet-500/20" : "text-slate-400 hover:text-slate-200"
+                          )}
+                        >
+                          Submission
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -927,49 +1048,248 @@ export default function PracticeWorkspacePage() {
                 {/* Console Drawer Content */}
                 {!isConsoleCollapsed && (
                   <div className="flex-1 p-4 overflow-y-auto font-mono text-xs leading-relaxed text-slate-300">
-                    
-                    {consoleActiveTab === 'output' && (
-                      <pre className="whitespace-pre-wrap font-mono select-text bg-[#0c0c14] p-3 rounded-lg min-h-[90%] border border-[#2d2d3a]/60">
-                        {consoleOutput || '[INFO] System Idle. Run code or submit to inspect terminal logs.'}
-                      </pre>
-                    )}
 
                     {consoleActiveTab === 'testcases' && (
                       <div className="space-y-4">
-                        <p className="text-[10px] text-slate-400 font-sans uppercase font-bold tracking-wider mb-2">Sample Test Cases Configured</p>
-                        {sampleTestCasesList.length === 0 ? (
-                          <p className="text-slate-500 font-sans">No sample test cases configured for this question.</p>
+                        {isExecuting ? (
+                          <div className="flex flex-col items-center justify-center py-8 gap-3">
+                            <Spinner className="h-8 w-8 border-[3px] border-violet-500/20 border-t-violet-500" />
+                            <p className="text-xs text-slate-400 font-sans">Compiling and running test cases...</p>
+                          </div>
+                        ) : runError ? (
+                          <div className="p-4 bg-rose-950/20 border border-rose-500/20 rounded-xl text-rose-300 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <span className="h-2 w-2 rounded-full bg-rose-500" />
+                              <span className="font-bold text-xs uppercase tracking-wider">Execution Failed</span>
+                            </div>
+                            <pre className="font-mono text-xs whitespace-pre-wrap leading-relaxed select-text overflow-x-auto p-2 bg-black/40 rounded border border-[#2d2d3a]/30">{runError}</pre>
+                          </div>
+                        ) : runResults ? (
+                          <div>
+                            {/* Case Tabs */}
+                            <div className="flex flex-wrap gap-2 border-b border-[#2d2d3a] pb-2 mb-4">
+                              {runResults.map((result, idx) => (
+                                <button
+                                  key={idx}
+                                  onClick={() => setSelectedResultCaseIdx(idx)}
+                                  className={cn(
+                                    "px-3 py-1.5 rounded text-xs font-bold border flex items-center gap-1.5 transition-all duration-200",
+                                    selectedResultCaseIdx === idx
+                                      ? "bg-[#20202d] text-violet-400 border-violet-500/40 shadow-sm"
+                                      : "bg-[#0c0c14] text-slate-400 border-[#2d2d3a] hover:text-slate-200 hover:bg-[#0c0c14]/80"
+                                  )}
+                                >
+                                  <span className={cn(
+                                    "h-2 w-2 rounded-full",
+                                    result.passed ? "bg-emerald-500 shadow-sm shadow-emerald-500/50" : "bg-rose-500 shadow-sm shadow-rose-500/50"
+                                  )} />
+                                  Case {idx + 1}
+                                </button>
+                              ))}
+                            </div>
+
+                            {/* Details of selected case */}
+                            {runResults[selectedResultCaseIdx] && (() => {
+                              const activeCase = runResults[selectedResultCaseIdx];
+                              return (
+                                <div className="space-y-3 p-4 bg-[#0c0c14] rounded-xl border border-[#2d2d3a] transition-all duration-300">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Case {selectedResultCaseIdx + 1} Details</span>
+                                    <span className={cn(
+                                      "px-2.5 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider border",
+                                      activeCase.passed
+                                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                                        : "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                                    )}>
+                                      {activeCase.status || (activeCase.passed ? "Accepted" : "Wrong Answer")}
+                                    </span>
+                                  </div>
+
+                                  <div className="space-y-3 text-xs">
+                                    <div>
+                                      <span className="text-slate-500 font-sans font-semibold">Input:</span>
+                                      <pre className="p-2.5 mt-1 rounded bg-black/40 text-slate-300 font-mono text-[11px] overflow-x-auto whitespace-pre-wrap select-text border border-[#2d2d3a]/30">{activeCase.input}</pre>
+                                    </div>
+                                    <div>
+                                      <span className="text-slate-500 font-sans font-semibold">Expected Output:</span>
+                                      <pre className="p-2.5 mt-1 rounded bg-black/40 text-slate-300 font-mono text-[11px] overflow-x-auto whitespace-pre-wrap select-text border border-[#2d2d3a]/30">{activeCase.expectedOutput}</pre>
+                                    </div>
+                                    <div>
+                                      <span className="text-slate-500 font-sans font-semibold">Actual Output / Stdout:</span>
+                                      <pre className={cn(
+                                        "p-2.5 mt-1 rounded bg-black/40 font-mono text-[11px] overflow-x-auto whitespace-pre-wrap select-text border border-[#2d2d3a]/30",
+                                        activeCase.passed ? "text-emerald-400 border-emerald-500/10" : "text-rose-400 border-rose-500/10"
+                                      )}>
+                                        {activeCase.actualOutput || "(no output)"}
+                                      </pre>
+                                    </div>
+                                    {!activeCase.passed && activeCase.error && (
+                                      <div>
+                                        <span className="text-rose-400 font-sans font-semibold">Error Details:</span>
+                                        <pre className="p-2.5 mt-1 rounded bg-rose-950/20 text-rose-300 border border-rose-500/10 font-mono text-[11px] overflow-x-auto whitespace-pre-wrap select-text">{activeCase.error}</pre>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </div>
                         ) : (
-                          <div className="grid gap-3 sm:grid-cols-2">
-                            {sampleTestCasesList.map((tc, idx) => (
-                              <div key={tc.id || idx} className="p-3 bg-[#0c0c14] rounded-xl border border-[#2d2d3a] flex flex-col gap-1.5">
-                                <p className="text-[10px] text-violet-400 font-semibold uppercase">Case {idx + 1}</p>
-                                <div>
-                                  <span className="text-slate-500 font-sans">Input:</span>
-                                  <div className="p-1.5 mt-0.5 rounded bg-black/30 text-slate-300 font-mono text-[11px] truncate">{tc.input}</div>
-                                </div>
-                                <div>
-                                  <span className="text-slate-500 font-sans">Expected output:</span>
-                                  <div className="p-1.5 mt-0.5 rounded bg-black/30 text-slate-300 font-mono text-[11px] truncate">{tc.expectedOutput}</div>
-                                </div>
+                          <div>
+                            <p className="text-[10px] text-slate-400 font-sans uppercase font-bold tracking-wider mb-2">Sample Test Cases Configured</p>
+                            {sampleTestCasesList.length === 0 ? (
+                              <p className="text-slate-500 font-sans">No sample test cases configured for this question.</p>
+                            ) : (
+                              <div className="grid gap-3 sm:grid-cols-2">
+                                {sampleTestCasesList.map((tc, idx) => (
+                                  <div key={tc.id || idx} className="p-3 bg-[#0c0c14] rounded-xl border border-[#2d2d3a] flex flex-col gap-1.5">
+                                    <p className="text-[10px] text-violet-400 font-semibold uppercase">Case {idx + 1}</p>
+                                    <div>
+                                      <span className="text-slate-500 font-sans">Input:</span>
+                                      <div className="p-1.5 mt-0.5 rounded bg-black/30 text-slate-300 font-mono text-[11px] truncate">{tc.input}</div>
+                                    </div>
+                                    <div>
+                                      <span className="text-slate-500 font-sans">Expected output:</span>
+                                      <div className="p-1.5 mt-0.5 rounded bg-black/30 text-slate-300 font-mono text-[11px] truncate">{tc.expectedOutput}</div>
+                                    </div>
+                                  </div>
+                                ))}
                               </div>
-                            ))}
+                            )}
                           </div>
                         )}
                       </div>
                     )}
 
-                    {consoleActiveTab === 'details' && (
-                      <div className="space-y-2 text-slate-400 font-sans">
-                        <h4 className="text-xs font-semibold text-slate-200">Execution Backend Status</h4>
-                        <p className="text-xs leading-relaxed">
-                          The DSA practice coding workspace supports running arbitrary programming solutions in an isolated sandbox. 
-                        </p>
-                        <div className="mt-3 p-3 bg-[#0c0c14] rounded-lg border border-[#2d2d3a] font-mono text-[11px] text-violet-400 space-y-1">
-                          <div>ENDPOINT: POST /api/questions/slug/{slug}/run</div>
-                          <div>MOCK_SUBMIT: POST /api/questions/slug/{slug}/submit</div>
-                          <div>STATUS: API NOT IMPLEMENTED</div>
-                        </div>
+                    {consoleActiveTab === 'submission' && (
+                      <div className="space-y-5 font-sans">
+                        {isSubmitting ? (
+                          <div className="flex flex-col items-center justify-center py-10 gap-3">
+                            <Spinner className="h-9 w-9 border-[3px] border-violet-500/20 border-t-violet-500" />
+                            <p className="text-xs text-slate-400 font-sans tracking-wide">Submitting solution & running hidden test cases...</p>
+                          </div>
+                        ) : submitError ? (
+                          <div className="p-4 bg-rose-950/20 border border-rose-500/20 rounded-xl text-rose-300 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <span className="h-2 w-2 rounded-full bg-rose-500" />
+                              <span className="font-bold text-xs uppercase tracking-wider">Submission Failed</span>
+                            </div>
+                            <pre className="font-mono text-xs whitespace-pre-wrap leading-relaxed select-text overflow-x-auto p-2 bg-black/40 rounded border border-[#2d2d3a]/30">{submitError}</pre>
+                          </div>
+                        ) : submitResults ? (
+                          <div className="space-y-5">
+                            {/* Glowing verdict banner */}
+                            <div className={cn(
+                              "relative overflow-hidden p-5 rounded-2xl border transition-all duration-500 shadow-md",
+                              submitResults.success
+                                ? "bg-gradient-to-r from-emerald-950/30 to-teal-950/20 border-emerald-500/20 shadow-emerald-900/10"
+                                : "bg-gradient-to-r from-rose-950/30 to-red-950/20 border-rose-500/20 shadow-rose-900/10"
+                            )}>
+                              {/* Glowing pulse background */}
+                              <div className={cn(
+                                "absolute -right-16 -top-16 w-36 h-36 rounded-full blur-3xl opacity-30 animate-pulse",
+                                submitResults.success ? "bg-emerald-400" : "bg-rose-400"
+                              )} />
+
+                              <div className="flex items-center justify-between gap-4 relative z-10">
+                                <div>
+                                  <p className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest">Submission Verdict</p>
+                                  <h3 className={cn(
+                                    "text-2xl font-black tracking-wide uppercase mt-1.5 flex items-center gap-2",
+                                    submitResults.success ? "text-emerald-400" : "text-rose-400"
+                                  )}>
+                                    <span>{submitResults.success ? '✓' : '✗'}</span>
+                                    <span>{submitResults.status || (submitResults.success ? "Accepted" : "Wrong Answer")}</span>
+                                  </h3>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest">Tests Passed</p>
+                                  <p className="text-lg font-black text-slate-100 mt-1">
+                                    {submitResults.passedTestCases} / {submitResults.totalTestCases}
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Progress bar */}
+                              <div className="mt-4">
+                                <div className="flex justify-between text-[10px] text-slate-400 mb-1.5 font-bold uppercase tracking-wider">
+                                  <span>Suite progress</span>
+                                  <span>{Math.round((submitResults.passedTestCases / (submitResults.totalTestCases || 1)) * 100)}%</span>
+                                </div>
+                                <div className="h-2 w-full bg-black/40 rounded-full overflow-hidden border border-white/5">
+                                  <div
+                                    className={cn(
+                                      "h-full rounded-full transition-all duration-1000 ease-out",
+                                      submitResults.success ? "bg-emerald-500" : "bg-rose-500"
+                                    )}
+                                    style={{ width: `${(submitResults.passedTestCases / (submitResults.totalTestCases || 1)) * 100}%` }}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Performance metrics grid */}
+                            <div className="grid grid-cols-2 gap-4 font-mono">
+                              <div className="p-4 bg-[#0c0c14] rounded-2xl border border-[#2d2d3a] flex flex-col gap-1.5 hover:border-violet-500/20 transition-all duration-300">
+                                <div className="flex items-center gap-1.5 text-slate-400">
+                                  <span className="text-xs">⚡</span>
+                                  <span className="text-[10px] font-sans font-bold uppercase tracking-wider">Runtime</span>
+                                </div>
+                                <span className="text-xl font-black text-violet-400">
+                                  {submitResults.runtimeMs !== undefined ? `${submitResults.runtimeMs} ms` : "N/A"}
+                                </span>
+                              </div>
+                              <div className="p-4 bg-[#0c0c14] rounded-2xl border border-[#2d2d3a] flex flex-col gap-1.5 hover:border-violet-500/20 transition-all duration-300">
+                                <div className="flex items-center gap-1.5 text-slate-400">
+                                  <span className="text-xs">🧠</span>
+                                  <span className="text-[10px] font-sans font-bold uppercase tracking-wider">Memory</span>
+                                </div>
+                                <span className="text-xl font-black text-violet-400">
+                                  {submitResults.memoryMb !== undefined ? `${submitResults.memoryMb.toFixed(1)} MB` : "N/A"}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Failure details card */}
+                            {!submitResults.success && submitResults.failedTestCase && (
+                              <div className="p-5 bg-[#0c0c14] rounded-2xl border border-[#2d2d3a]/80 space-y-4">
+                                <div className="flex items-center gap-2 border-b border-[#2d2d3a] pb-2">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+                                  <h4 className="text-xs font-bold text-rose-400 uppercase tracking-wider">Failed Test Case Info</h4>
+                                </div>
+                                <div className="space-y-3 font-mono text-[11px]">
+                                  <div>
+                                    <span className="text-slate-500 font-sans font-semibold">Input:</span>
+                                    <pre className="p-3 mt-1.5 rounded bg-black/40 text-slate-300 border border-white/[0.02] overflow-x-auto whitespace-pre-wrap select-text">{submitResults.failedTestCase.input}</pre>
+                                  </div>
+                                  <div>
+                                    <span className="text-slate-500 font-sans font-semibold">Expected Output:</span>
+                                    <pre className="p-3 mt-1.5 rounded bg-black/40 text-slate-300 border border-white/[0.02] overflow-x-auto whitespace-pre-wrap select-text">{submitResults.failedTestCase.expectedOutput}</pre>
+                                  </div>
+                                  <div>
+                                    <span className="text-slate-500 font-sans font-semibold">Actual Output:</span>
+                                    <pre className="p-3 mt-1.5 rounded bg-rose-950/20 text-rose-400 border border-rose-500/10 overflow-x-auto whitespace-pre-wrap select-text font-bold">{submitResults.failedTestCase.actualOutput || "(no output)"}</pre>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Back to Testcases helper */}
+                            <div className="flex justify-end">
+                              <button
+                                onClick={() => setConsoleActiveTab('testcases')}
+                                className="text-xs font-bold text-slate-400 hover:text-violet-400 transition-colors uppercase tracking-wider flex items-center gap-1"
+                              >
+                                <span>←</span>
+                                <span>Back to Test Cases</span>
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-center py-6 text-slate-400 font-sans text-xs">
+                            No submission history in this session.
+                          </div>
+                        )}
                       </div>
                     )}
 
