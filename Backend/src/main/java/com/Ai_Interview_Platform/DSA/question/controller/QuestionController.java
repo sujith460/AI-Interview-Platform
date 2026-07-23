@@ -1,7 +1,6 @@
 package com.Ai_Interview_Platform.DSA.question.controller;
 
 import com.Ai_Interview_Platform.DSA.common.dto.PagedResponse;
-import com.Ai_Interview_Platform.DSA.common.enums.Difficulty;
 import com.Ai_Interview_Platform.DSA.question.dto.*;
 import com.Ai_Interview_Platform.DSA.question.service.QuestionService;
 import jakarta.validation.Valid;

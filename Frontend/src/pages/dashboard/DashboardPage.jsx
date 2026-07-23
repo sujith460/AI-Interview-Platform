@@ -150,7 +150,13 @@ export default function DashboardPage() {
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {UPCOMING_FEATURES.map(({ title, description, icon: Icon, accent, statusClass }) => {
                   let onClick = null;
-                  if (title === 'Practice Coding') {
+                  let actionText = null;
+                  let isButton = false;
+                  if (title === 'AI Interview') {
+                    onClick = () => navigate('/interview/start');
+                    actionText = 'Start Interview';
+                    isButton = true;
+                  } else if (title === 'Practice Coding') {
                     onClick = () => navigate('/practice');
                   } else if (title === 'Profile') {
                     onClick = () => navigate('/profile');
@@ -163,6 +169,8 @@ export default function DashboardPage() {
                       accent={accent}
                       statusClass={statusClass}
                       onClick={onClick}
+                      actionText={actionText}
+                      isButton={isButton}
                     >
                       <Icon />
                     </DashboardCard>
@@ -188,31 +196,46 @@ function ProfileField({ label, value, className }) {
   );
 }
 
-function DashboardCard({ title, description, accent, statusClass, onClick, children }) {
+function DashboardCard({ title, description, accent, statusClass, onClick, actionText, isButton, children }) {
   const isActive = !!onClick;
   return (
     <Card
       onClick={onClick}
       className={cn(
-        "p-5 transition-all duration-200 border border-slate-200/60 dark:border-white/5",
+        "p-5 transition-all duration-200 border border-slate-200/60 dark:border-white/5 flex flex-col justify-between",
         isActive 
           ? "cursor-pointer hover:-translate-y-1 hover:shadow-lg dark:hover:border-violet-500/30 dark:hover:bg-white/[0.03] hover:border-violet-500/20" 
           : "opacity-90"
       )}
       aria-disabled={!isActive}
     >
-      <div
-        className={`mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br ${accent} text-white shadow-lg`}
-      >
-        {children}
+      <div>
+        <div
+          className={`mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br ${accent} text-white shadow-lg`}
+        >
+          {children}
+        </div>
+        <h3 className="font-semibold text-slate-900 dark:text-white">{title}</h3>
+        <p className="mt-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+          {description}
+        </p>
       </div>
-      <h3 className="font-semibold text-slate-900 dark:text-white">{title}</h3>
-      <p className="mt-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-        {description}
-      </p>
-      {isActive ? (
+      {isButton ? (
+        <div className="mt-4">
+          <Button
+            size="sm"
+            className="w-full text-xs shadow-none"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onClick) onClick();
+            }}
+          >
+            {actionText || 'Start Interview'}
+          </Button>
+        </div>
+      ) : isActive ? (
         <p className="mt-4 text-xs font-bold text-violet-600 dark:text-violet-400 flex items-center gap-1">
-          Get Started
+          {actionText || 'Get Started'}
           <svg className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
             <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
           </svg>

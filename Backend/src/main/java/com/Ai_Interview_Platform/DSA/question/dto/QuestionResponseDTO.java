@@ -1,6 +1,6 @@
 package com.Ai_Interview_Platform.DSA.question.dto;
 
-import com.Ai_Interview_Platform.DSA.common.enums.Difficulty;
+import com.Ai_Interview_Platform.DSA.question.enums.Difficulty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;

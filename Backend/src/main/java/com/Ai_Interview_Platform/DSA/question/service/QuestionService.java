@@ -1,7 +1,6 @@
 package com.Ai_Interview_Platform.DSA.question.service;
 
 import com.Ai_Interview_Platform.DSA.common.dto.PagedResponse;
-import com.Ai_Interview_Platform.DSA.common.enums.Difficulty;
 import com.Ai_Interview_Platform.DSA.company.entity.Company;
 import com.Ai_Interview_Platform.DSA.company.repository.CompanyRepository;
 import com.Ai_Interview_Platform.DSA.pattern.entity.Pattern;

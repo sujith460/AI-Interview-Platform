@@ -5,6 +5,8 @@ import DashboardPage from '@/pages/dashboard/DashboardPage';
 import ProfilePage from '@/pages/profile/ProfilePage';
 import PracticeListPage from '@/pages/practice/PracticeListPage';
 import PracticeWorkspacePage from '@/pages/practice/PracticeWorkspacePage';
+import InterviewSetupPage from '@/pages/interview/InterviewSetupPage';
+import InterviewRoomPage from '@/pages/interview/InterviewRoomPage';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 
 export default function AppRoutes() {
@@ -42,6 +44,22 @@ export default function AppRoutes() {
         element={
           <ProtectedRoute>
             <PracticeWorkspacePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/interview/start"
+        element={
+          <ProtectedRoute>
+            <InterviewSetupPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/interview/:sessionId"
+        element={
+          <ProtectedRoute>
+            <InterviewRoomPage />
           </ProtectedRoute>
         }
       />

@@ -1,6 +1,6 @@
 package com.Ai_Interview_Platform.DSA.question.entity;
 
-import com.Ai_Interview_Platform.DSA.common.enums.Difficulty;
+import com.Ai_Interview_Platform.DSA.question.enums.Difficulty;
 import com.Ai_Interview_Platform.DSA.company.entity.Company;
 import com.Ai_Interview_Platform.DSA.languagetemplate.entity.LanguageTemplate;
 import com.Ai_Interview_Platform.DSA.pattern.entity.Pattern;
