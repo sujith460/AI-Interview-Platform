@@ -1,8 +1,6 @@
 package com.Ai_Interview_Platform.DSA.conversation.dto;
 
-import com.Ai_Interview_Platform.DSA.conversation.enums.MessageRole;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import lombok.*;
 
 @Getter
@@ -10,10 +8,7 @@ import lombok.*;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class ConversationMessageRequestDTO {
-
-    @NotNull
-    private MessageRole role;
+public class CandidateMessageRequestDTO {
 
     @NotBlank
     private String content;

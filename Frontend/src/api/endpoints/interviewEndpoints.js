@@ -1,4 +1,17 @@
 export const INTERVIEW_ENDPOINTS = {
   CREATE_SESSION: '/api/interview/sessions',
+  GET_SESSION_DETAILS: (sessionId) => `/api/interview/sessions/${sessionId}`,
+  START_SESSION: (sessionId) => `/api/interview/sessions/${sessionId}/start`,
+  SUBMIT_SESSION_MESSAGE: (sessionId) => `/api/interview/sessions/${sessionId}/message`,
+  REQUEST_SESSION_HINT: (sessionId) => `/api/interview/sessions/${sessionId}/hint`,
+  SUBMIT_SESSION_CODE: (sessionId) => `/api/interview/sessions/${sessionId}/code`,
+  FINISH_SESSION: (sessionId) => `/api/interview/sessions/${sessionId}/finish`,
+
   GET_COMPANIES: '/api/companies',
+  GET_CONVERSATION_BY_SESSION: (sessionId) => `/api/conversations/session/${sessionId}`,
+  GET_CONVERSATION: (conversationId) => `/api/conversations/${conversationId}`,
+  GET_CONVERSATION_MESSAGES: (conversationId) => `/api/conversations/${conversationId}/messages`,
+  SEND_CANDIDATE_MESSAGE: (conversationId) => `/api/conversations/${conversationId}/messages/candidate`,
+  SEND_AI_MESSAGE: (conversationId) => `/api/conversations/${conversationId}/messages/ai`,
+  SEND_SYSTEM_MESSAGE: (conversationId) => `/api/conversations/${conversationId}/messages/system`,
 };

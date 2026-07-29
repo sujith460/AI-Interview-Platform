@@ -25,6 +25,14 @@ public class InterviewSessionResponseDTO {
 
     private InterviewState state;
 
+    private com.Ai_Interview_Platform.DSA.ai.enums.InterviewStage currentStage;
+
+    private String currentTopic;
+
+    private String currentQuestion;
+
+    private String programmingLanguage;
+
     private LocalDateTime startedAt;
 
     private LocalDateTime endedAt;

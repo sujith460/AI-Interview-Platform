@@ -1,6 +1,5 @@
 package com.Ai_Interview_Platform.DSA.conversation.mapper;
 
-import com.Ai_Interview_Platform.DSA.conversation.dto.ConversationMessageRequestDTO;
 import com.Ai_Interview_Platform.DSA.conversation.dto.ConversationMessageResponseDTO;
 import com.Ai_Interview_Platform.DSA.conversation.dto.ConversationResponseDTO;
 import com.Ai_Interview_Platform.DSA.conversation.entity.Conversation;
@@ -20,10 +19,6 @@ public interface ConversationMapper {
     @Mapping(target = "messageId", source = "id")
     ConversationMessageResponseDTO toConversationMessageResponseDTO(
             ConversationMessage message
-    );
-
-    ConversationMessage toConversationMessage(
-            ConversationMessageRequestDTO request
     );
 
 }

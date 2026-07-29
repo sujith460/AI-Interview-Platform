@@ -44,6 +44,16 @@ public class InterviewSession {
     @Column(nullable = false)
     private InterviewState state;
 
+    @Enumerated(EnumType.STRING)
+    private com.Ai_Interview_Platform.DSA.ai.enums.InterviewStage currentStage;
+
+    private String currentTopic;
+
+    @Column(columnDefinition = "TEXT")
+    private String currentQuestion;
+
+    private String programmingLanguage;
+
     private LocalDateTime startedAt;
 
     private LocalDateTime endedAt;
