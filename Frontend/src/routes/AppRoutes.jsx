@@ -7,6 +7,8 @@ import PracticeListPage from '@/pages/practice/PracticeListPage';
 import PracticeWorkspacePage from '@/pages/practice/PracticeWorkspacePage';
 import InterviewSetupPage from '@/pages/interview/InterviewSetupPage';
 import InterviewRoomPage from '@/pages/interview/InterviewRoomPage';
+import InterviewHistoryPage from '@/pages/interview/InterviewHistoryPage';
+import AnalyticsPage from '@/pages/analytics/AnalyticsPage';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 
 export default function AppRoutes() {
@@ -20,6 +22,14 @@ export default function AppRoutes() {
         element={
           <ProtectedRoute>
             <DashboardPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/analytics"
+        element={
+          <ProtectedRoute>
+            <AnalyticsPage />
           </ProtectedRoute>
         }
       />
@@ -52,6 +62,14 @@ export default function AppRoutes() {
         element={
           <ProtectedRoute>
             <InterviewSetupPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/interview/history"
+        element={
+          <ProtectedRoute>
+            <InterviewHistoryPage />
           </ProtectedRoute>
         }
       />

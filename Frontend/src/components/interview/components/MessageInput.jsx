@@ -1,26 +1,78 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import useSpeechRecognition from '@/hooks/voice/useSpeechRecognition';
 import { cn } from '@/utils/helpers/cn';
 
 /**
  * MessageInput component supporting candidate response entry, keyboard shortcuts,
- * input lock during AI typing, draft preservation, and voice input integration.
+ * input lock during AI typing/speaking, draft preservation, and voice input integration.
  */
 export default function MessageInput({
   onSendMessage,
   isSending = false,
   isAiTyping = false,
+  isAiSpeaking = false,
   disabled = false,
+  isMicOn = true,
+  onToggleMic,
 }) {
   const [text, setText] = useState('');
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const textareaRef = useRef(null);
 
-  // Auto-focus input on mount or when AI finishes typing
+  const isAiActive = isAiSpeaking || isAiTyping;
+
+  const handleSpeechResult = useCallback((updatedText) => {
+    setText(updatedText);
+  }, []);
+
+  // Integrate Speech Recognition
+  const {
+    isListening,
+    transcript,
+    interimTranscript,
+    startListening,
+    stopListening,
+    resetTranscript,
+    isSupported: isSttSupported,
+  } = useSpeechRecognition({
+    onResult: handleSpeechResult,
+  });
+
+  // Auto-start speech recognition ONLY when microphone is ON and AI is NOT speaking/typing
   useEffect(() => {
-    if (!isAiTyping && !isSending && !disabled && textareaRef.current) {
+    if (isMicOn && isSttSupported && !disabled && !isAiActive) {
+      startListening();
+      setIsVoiceActive(true);
+    } else {
+      stopListening();
+      setIsVoiceActive(false);
+    }
+  }, [isMicOn, isSttSupported, disabled, isAiActive, startListening, stopListening]);
+
+  // Toggle mic state
+  const handleToggleVoice = () => {
+    if (onToggleMic) {
+      onToggleMic();
+    } else {
+      if (isListening || isVoiceActive) {
+        stopListening();
+        setIsVoiceActive(false);
+      } else {
+        resetTranscript();
+        if (!isAiActive) {
+          startListening();
+          setIsVoiceActive(true);
+        }
+      }
+    }
+  };
+
+  // Auto-focus input on mount or when AI finishes typing/speaking
+  useEffect(() => {
+    if (!isAiActive && !isSending && !disabled && textareaRef.current) {
       textareaRef.current.focus();
     }
-  }, [isAiTyping, isSending, disabled]);
+  }, [isAiActive, isSending, disabled]);
 
   // Dynamic textarea height
   useEffect(() => {
@@ -28,13 +80,15 @@ export default function MessageInput({
       textareaRef.current.style.height = 'auto';
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
     }
-  }, [text]);
+  }, [text, interimTranscript]);
 
   const handleSend = () => {
-    const trimmed = text.trim();
-    if (!trimmed || isSending || isAiTyping || disabled) return;
-    onSendMessage(trimmed);
+    const fullText = (text + (interimTranscript ? ' ' + interimTranscript : '')).trim();
+    if (!fullText || isSending || isAiActive || disabled) return;
+
+    onSendMessage(fullText);
     setText('');
+    resetTranscript();
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
@@ -47,24 +101,35 @@ export default function MessageInput({
     }
   };
 
-  const isInputDisabled = isSending || isAiTyping || disabled;
+  const isInputDisabled = isSending || isAiActive || disabled;
 
   return (
     <div className="border-t border-slate-200/60 bg-white/80 p-3.5 backdrop-blur-md dark:border-white/5 dark:bg-[#070714]/90">
-      {/* Voice Mode Banner */}
-      {isVoiceActive && (
-        <div className="mb-2 flex items-center justify-between rounded-xl bg-violet-500/10 border border-violet-500/20 px-3 py-1.5 text-xs text-violet-700 dark:text-violet-300 animate-pulse">
+      {/* AI Speaking Indicator - Mic Paused */}
+      {isAiActive && isMicOn && (
+        <div className="mb-2 flex items-center justify-between rounded-xl bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 text-xs text-amber-600 dark:text-amber-300">
           <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-violet-500 animate-ping" />
+            <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+            <span className="font-bold">AI Speaking:</span>
+            <span className="italic">Mic paused until AI finishes response...</span>
+          </div>
+        </div>
+      )}
+
+      {/* Voice Active Live Banner */}
+      {!isAiActive && (isVoiceActive || isListening) && (
+        <div className="mb-2 flex items-center justify-between rounded-xl bg-violet-500/10 border border-violet-500/30 px-3 py-1.5 text-xs text-violet-700 dark:text-violet-300">
+          <div className="flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-rose-500 animate-ping" />
             <span className="font-bold">Voice Input Active:</span>
-            <span>Microphone Speech-to-Text ready</span>
+            <span className="italic">Listening to candidate speech...</span>
           </div>
           <button
             type="button"
-            onClick={() => setIsVoiceActive(false)}
+            onClick={handleToggleVoice}
             className="text-[10px] underline font-bold hover:text-violet-900 dark:hover:text-white"
           >
-            Cancel
+            Pause Mic Voice Input
           </button>
         </div>
       )}
@@ -74,45 +139,64 @@ export default function MessageInput({
         {/* Voice Toggle Button */}
         <button
           type="button"
-          onClick={() => setIsVoiceActive(!isVoiceActive)}
+          onClick={handleToggleVoice}
           disabled={isInputDisabled}
           className={cn(
             'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-all duration-200 border shadow-xs',
-            isVoiceActive
-              ? 'bg-rose-500 text-white border-rose-600 animate-pulse'
-              : 'border-slate-200 bg-white text-slate-700 hover:bg-violet-50 hover:text-violet-600 dark:border-white/10 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+            (isListening || isVoiceActive) && !isAiActive
+              ? 'bg-rose-600 text-white border-rose-500 ring-2 ring-rose-500/30 animate-pulse'
+              : isMicOn
+              ? 'border-violet-500/30 bg-violet-500/10 text-violet-400 hover:bg-violet-500/20'
+              : 'border-slate-700 bg-slate-800 text-slate-400 opacity-60'
           )}
-          title="Toggle Voice Input (Speech-to-Text)"
+          title={
+            !isMicOn
+              ? 'Microphone is OFF. Click to turn ON & start voice input.'
+              : isAiActive
+              ? 'AI is speaking. Voice input will resume automatically.'
+              : isListening
+              ? 'Stop Voice Input'
+              : 'Start Speech-to-Text Voice Input'
+          }
         >
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 003-3V4.5a3 3 0 00-6 0v8.25a3 3 0 003 3z" />
           </svg>
         </button>
 
-        {/* Text Area */}
-        <textarea
-          ref={textareaRef}
-          rows={1}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={
-            isAiTyping
-              ? 'AI Interviewer is responding...'
-              : 'Type your interview response... (Enter to submit, Shift+Enter for newline)'
-          }
-          disabled={isInputDisabled}
-          className="max-h-32 flex-1 resize-none bg-transparent px-2 py-1.5 text-xs sm:text-sm text-slate-800 placeholder-slate-400 outline-none dark:text-slate-100 dark:placeholder-slate-500 disabled:opacity-50"
-        />
+        {/* Text Area with Live Voice Transcript Preview */}
+        <div className="flex-1 flex flex-col min-w-0">
+          <textarea
+            ref={textareaRef}
+            rows={1}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={
+              isAiActive
+                ? 'AI Interviewer is speaking/responding...'
+                : isListening
+                ? 'Speak into microphone... (or type response)'
+                : 'Type or speak your answer... (Enter to submit, Shift+Enter for newline)'
+            }
+            disabled={isInputDisabled}
+            className="max-h-32 w-full resize-none bg-transparent px-2 py-1.5 text-xs sm:text-sm text-slate-800 placeholder-slate-400 outline-none dark:text-slate-100 dark:placeholder-slate-500 disabled:opacity-50"
+          />
+          {interimTranscript && !isAiActive && (
+            <span className="px-2 pb-1 text-[11px] font-medium text-violet-400 italic">
+              Speaking: "{interimTranscript}..."
+            </span>
+          )}
+        </div>
 
         {/* Submit Response Button */}
         <button
           type="button"
           onClick={handleSend}
-          disabled={!text.trim() || isInputDisabled}
+          disabled={(!text.trim() && !interimTranscript.trim()) || isInputDisabled}
           className={cn(
             'flex h-9 items-center gap-1.5 rounded-xl bg-gradient-to-br from-violet-600 via-indigo-600 to-purple-700 px-3.5 text-xs font-bold text-white shadow-md transition-all duration-200 hover:scale-105 active:scale-95 disabled:pointer-events-none disabled:opacity-40',
-            text.trim() && 'shadow-violet-500/30'
+            (text.trim() || interimTranscript.trim()) && 'shadow-violet-500/30'
           )}
           title="Submit Candidate Response"
         >
@@ -135,8 +219,21 @@ export default function MessageInput({
       <div className="mt-2 flex items-center justify-between px-2 text-[10px] text-slate-400 dark:text-slate-500">
         <span>Enter = Send | Shift + Enter = Newline</span>
         <span className="flex items-center gap-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-          Voice & Text Input Pipeline Ready
+          <span
+            className={cn(
+              'h-1.5 w-1.5 rounded-full',
+              isAiActive
+                ? 'bg-amber-500 animate-pulse'
+                : isListening
+                ? 'bg-rose-500 animate-ping'
+                : 'bg-emerald-500'
+            )}
+          />
+          {isAiActive
+            ? 'AI Speaking (Mic Paused)'
+            : isListening
+            ? 'Microphone Active'
+            : 'Voice Input Ready'}
         </span>
       </div>
     </div>

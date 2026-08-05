@@ -11,8 +11,23 @@ export async function getCompanies() {
   return data;
 }
 
+export async function getUserInterviewHistory() {
+  const { data } = await axiosClient.get(INTERVIEW_ENDPOINTS.GET_USER_SESSIONS);
+  return data;
+}
+
 export async function getSessionDetails(sessionId) {
   const { data } = await axiosClient.get(INTERVIEW_ENDPOINTS.GET_SESSION_DETAILS(sessionId));
+  return data;
+}
+
+export async function getInterviewReport(sessionId) {
+  const { data } = await axiosClient.get(INTERVIEW_ENDPOINTS.GET_SESSION_REPORT(sessionId));
+  return data;
+}
+
+export async function deleteInterviewSession(sessionId) {
+  const { data } = await axiosClient.delete(INTERVIEW_ENDPOINTS.DELETE_SESSION(sessionId));
   return data;
 }
 

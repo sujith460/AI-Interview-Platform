@@ -8,8 +8,10 @@ import { cn } from '@/utils/helpers/cn';
 export default function InterviewControls({
   isCameraOn = true,
   isMicOn = true,
+  isAiVoiceMuted = false,
   onToggleCamera,
   onToggleMic,
+  onToggleAiVoice,
   onResetCode,
   onRunCode,
   onRequestHint,
@@ -21,7 +23,6 @@ export default function InterviewControls({
   isAiTyping = false,
 }) {
   const [showFinishModal, setShowFinishModal] = useState(false);
-  const [isVoiceMode, setIsVoiceMode] = useState(false);
 
   const handleConfirmFinish = () => {
     setShowFinishModal(false);
@@ -38,12 +39,13 @@ export default function InterviewControls({
             className={cn(
               'flex flex-1 items-center justify-center gap-1.5 h-8 rounded-xl border text-[11px] font-semibold transition-all',
               isMicOn
-                ? 'border-white/10 bg-slate-900/60 text-slate-200 hover:bg-slate-800'
-                : 'border-rose-500/30 bg-rose-500/10 text-rose-400'
+                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
+                : 'border-rose-500/40 bg-rose-500/10 text-rose-400'
             )}
+            title={isMicOn ? 'Click to Mute Candidate Microphone' : 'Click to Unmute Candidate Microphone'}
           >
             <span>{isMicOn ? '🎙️' : '🔇'}</span>
-            <span>{isMicOn ? 'Mute Mic' : 'Unmute'}</span>
+            <span>{isMicOn ? 'Mic ON' : 'Mic OFF'}</span>
           </button>
 
           <button
@@ -60,16 +62,17 @@ export default function InterviewControls({
           </button>
 
           <button
-            onClick={() => setIsVoiceMode(!isVoiceMode)}
+            onClick={onToggleAiVoice}
             className={cn(
               'flex flex-1 items-center justify-center gap-1.5 h-8 rounded-xl border text-[11px] font-semibold transition-all',
-              isVoiceMode
+              !isAiVoiceMuted
                 ? 'border-violet-500/40 bg-violet-500/20 text-violet-300 ring-1 ring-violet-500/20'
-                : 'border-white/10 bg-slate-900/60 text-slate-200 hover:bg-slate-800'
+                : 'border-slate-700 bg-slate-900/60 text-slate-400 hover:bg-slate-800'
             )}
+            title={!isAiVoiceMuted ? 'Mute AI Voice Speech' : 'Unmute AI Voice Speech'}
           >
-            <span>🎤</span>
-            <span>{isVoiceMode ? 'Voice On' : 'Voice'}</span>
+            <span>{!isAiVoiceMuted ? '🔊' : '🔇'}</span>
+            <span>{!isAiVoiceMuted ? 'AI Voice ON' : 'AI Voice OFF'}</span>
           </button>
         </div>
 

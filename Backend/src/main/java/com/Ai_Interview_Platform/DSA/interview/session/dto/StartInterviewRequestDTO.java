@@ -16,4 +16,6 @@ public class StartInterviewRequestDTO {
 
     @NotNull
     private Difficulty difficulty;
+
+    private String role;
 }

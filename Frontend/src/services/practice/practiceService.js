@@ -10,6 +10,11 @@ export async function getQuestionDetails(slug) {
   return data;
 }
 
+export async function getQuestionLanguageTemplates(questionId) {
+  const { data } = await axiosClient.get(`/api/questions/${questionId}/language-templates`);
+  return data;
+}
+
 export async function searchQuestions(payload) {
   const { data } = await axiosClient.post('/api/questions/search', payload);
   return data;

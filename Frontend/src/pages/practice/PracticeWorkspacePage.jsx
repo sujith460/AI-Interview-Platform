@@ -5,7 +5,7 @@ import Alert from '@/components/ui/alert/Alert';
 import Button from '@/components/ui/button/Button';
 import Spinner from '@/components/ui/spinner/Spinner';
 import ThemeToggle from '@/components/common/ThemeToggle';
-import { getQuestionDetails, runCode, submitCode } from '@/services/practice/practiceService';
+import { getQuestionDetails, getQuestionLanguageTemplates, runCode, submitCode } from '@/services/practice/practiceService';
 import { cn } from '@/utils/helpers/cn';
 
 // Language mapping from Java enum strings to Monaco strings and user-friendly labels
@@ -154,37 +154,64 @@ export default function PracticeWorkspacePage() {
   // Fetch question details
   const fetchDetails = async () => {
     setIsLoading(true);
-    setQuestion(null); // Clear stale question details state
+    setQuestion(null);
     setError('');
     setRunResults(null);
     setSubmitResults(null);
     try {
       const data = await getQuestionDetails(slug);
-      setQuestion(data);
+      let templates = [];
 
-      // Populate language templates
-      if (data.languageTemplates && (data.languageTemplates.size > 0 || Array.from(data.languageTemplates || []).length > 0)) {
-        const templates = Array.from(data.languageTemplates);
-
-        // Restore globally preferred language
-        const preferredLang = localStorage.getItem('ai-interview-preferred-language');
-        const hasPreferredTemplate = templates.find((temp) => temp.language === preferredLang);
-        const defaultTemplate = hasPreferredTemplate || templates[0];
-        const defaultLang = defaultTemplate.language;
-
-        setSelectedLanguage(defaultLang);
-
-        // Build initial cache from localStorage or starter code
-        const initialCache = {};
-        templates.forEach((temp) => {
-          const savedCode = localStorage.getItem(`practice_code_${slug}_${temp.language}`);
-          initialCache[temp.language] = savedCode || temp.starterCode || '';
-        });
-        setCodeCache(initialCache);
-
-        // Load initial code
-        setEditorCode(initialCache[defaultLang] || '');
+      // 1. Try languageTemplates embedded in question details response
+      if (Array.isArray(data?.languageTemplates) && data.languageTemplates.length > 0) {
+        templates = data.languageTemplates;
+      } else if (data?.languageTemplates && typeof data.languageTemplates === 'object' && Object.keys(data.languageTemplates).length > 0) {
+        templates = Object.values(data.languageTemplates);
       }
+
+      // 2. Fall back to dedicated language-templates endpoint
+      if (templates.length === 0 && data?.id) {
+        try {
+          const apiTemplates = await getQuestionLanguageTemplates(data.id);
+          if (Array.isArray(apiTemplates) && apiTemplates.length > 0) {
+            templates = apiTemplates;
+          }
+        } catch (apiErr) {
+          console.warn('Could not fetch language templates:', apiErr);
+        }
+      }
+
+      // Merge templates into question object so languageTemplatesList memo works
+      const updatedQuestion = { ...data, languageTemplates: templates };
+      setQuestion(updatedQuestion);
+
+      if (templates.length === 0) {
+        // No templates at all — leave editor empty, dropdown empty
+        setSelectedLanguage('');
+        setEditorCode('');
+        setCodeCache({});
+        return;
+      }
+
+      // Pick default language: last-used or first in list
+      const preferredLang = localStorage.getItem('ai-interview-preferred-language');
+      const hasPreferred = templates.find((t) => String(t.language) === preferredLang);
+      const defaultTemplate = hasPreferred || templates[0];
+      const defaultLang = String(defaultTemplate.language);
+
+      setSelectedLanguage(defaultLang);
+
+      // Build code cache: prefer localStorage save, then DB starterCode
+      const initialCache = {};
+      templates.forEach((temp) => {
+        const lang = String(temp.language);
+        const saved = localStorage.getItem(`practice_code_${slug}_${lang}`);
+        initialCache[lang] = saved || temp.starterCode || '';
+      });
+      setCodeCache(initialCache);
+
+      // Set initial editor code from cache or DB starterCode
+      setEditorCode(initialCache[defaultLang] ?? defaultTemplate.starterCode ?? '');
     } catch (err) {
       setError(err?.response?.data?.message || 'Failed to fetch question details. Please try again.');
     } finally {
@@ -373,15 +400,21 @@ export default function PracticeWorkspacePage() {
 
   const handleLanguageChange = (newLang) => {
     if (selectedLanguage) {
-      // Save current code to cache
-      setCodeCache((prev) => ({
-        ...prev,
-        [selectedLanguage]: editorCode,
-      }));
+      // Persist current edits before switching
+      setCodeCache((prev) => ({ ...prev, [selectedLanguage]: editorCode }));
     }
     localStorage.setItem('ai-interview-preferred-language', newLang);
     setSelectedLanguage(newLang);
-    setEditorCode(codeCache[newLang] || '');
+
+    // Use cached edit if present, otherwise fall back to DB starterCode
+    const cached = codeCache[newLang];
+    if (cached !== undefined && cached !== '') {
+      setEditorCode(cached);
+    } else {
+      const dbTemplate = languageTemplatesList.find((t) => String(t.language) === newLang);
+      setEditorCode(dbTemplate?.starterCode ?? '');
+    }
+
     setRunResults(null);
     setRunError('');
     setSubmitResults(null);
@@ -553,10 +586,12 @@ export default function PracticeWorkspacePage() {
     editorRef.current = editor;
   };
 
-  // Format templates safely
+  // Derive template list straight from DB data stored on question state
   const languageTemplatesList = useMemo(() => {
-    if (!question || !question.languageTemplates) return [];
-    return Array.from(question.languageTemplates);
+    if (!question?.languageTemplates) return [];
+    if (Array.isArray(question.languageTemplates)) return question.languageTemplates;
+    if (typeof question.languageTemplates === 'object') return Object.values(question.languageTemplates);
+    return [];
   }, [question]);
 
   const sampleTestCasesList = useMemo(() => {
@@ -786,6 +821,21 @@ export default function PracticeWorkspacePage() {
                         </option>
                       ))}
                     </select>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const foundTemp = languageTemplatesList.find((t) => t.language === selectedLanguage);
+                        const freshCode = buildStarterCodeForQuestion(selectedLanguage, question?.functionSignature, foundTemp?.starterCode);
+                        setEditorCode(freshCode);
+                        localStorage.removeItem(`practice_code_${slug}_${selectedLanguage}`);
+                      }}
+                      title="Reset code template"
+                      className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-white/5 transition-colors"
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+                      </svg>
+                    </button>
                   </div>
 
                   {/* Theme Selector */}

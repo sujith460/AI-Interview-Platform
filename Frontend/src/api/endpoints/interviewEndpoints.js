@@ -1,6 +1,9 @@
 export const INTERVIEW_ENDPOINTS = {
   CREATE_SESSION: '/api/interview/sessions',
+  GET_USER_SESSIONS: '/api/interview/sessions',
   GET_SESSION_DETAILS: (sessionId) => `/api/interview/sessions/${sessionId}`,
+  GET_SESSION_REPORT: (sessionId) => `/api/interview/sessions/${sessionId}/report`,
+  DELETE_SESSION: (sessionId) => `/api/interview/sessions/${sessionId}`,
   START_SESSION: (sessionId) => `/api/interview/sessions/${sessionId}/start`,
   SUBMIT_SESSION_MESSAGE: (sessionId) => `/api/interview/sessions/${sessionId}/message`,
   REQUEST_SESSION_HINT: (sessionId) => `/api/interview/sessions/${sessionId}/hint`,

@@ -1,5 +1,6 @@
 package com.Ai_Interview_Platform.DSA.question.dto;
 
+import com.Ai_Interview_Platform.DSA.languagetemplate.dto.LanguageTemplateResponseDTO;
 import com.Ai_Interview_Platform.DSA.question.enums.Difficulty;
 import com.Ai_Interview_Platform.DSA.testcase.dto.TestCaseResponseDTO;
 import lombok.AllArgsConstructor;
@@ -38,5 +39,7 @@ public class QuestionDetailsResponseDTO {
     private Set<String> patterns;
 
     private Set<TestCaseResponseDTO> sampleTestCases;
+
+    private Set<LanguageTemplateResponseDTO> languageTemplates;
 
 }

@@ -6,6 +6,7 @@ import Card from '@/components/ui/card/Card';
 import Spinner from '@/components/ui/spinner/Spinner';
 import ThemeToggle from '@/components/common/ThemeToggle';
 import { getCompanies, createInterviewSession } from '@/services/interview/interviewService';
+import { cn } from '@/utils/helpers/cn';
 
 export default function InterviewSetupPage() {
   const navigate = useNavigate();
@@ -157,14 +158,61 @@ export default function InterviewSetupPage() {
                 </select>
               </div>
 
-              {/* Interview Type Dropdown */}
-              <div className="space-y-2">
+              {/* Interview Type Selection */}
+              <div className="space-y-3">
                 <label
-                  htmlFor="interview-type-select"
                   className="block text-sm font-semibold text-slate-800 dark:text-slate-200"
                 >
                   Interview Type
                 </label>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {/* DSA Option */}
+                  <div
+                    onClick={() => setInterviewType('DSA')}
+                    className={cn(
+                      'relative flex cursor-pointer flex-col justify-between rounded-xl border p-3.5 transition-all duration-200',
+                      interviewType === 'DSA'
+                        ? 'border-violet-500 bg-violet-500/10 ring-2 ring-violet-500/20 dark:bg-violet-500/20'
+                        : 'border-slate-200 bg-white/70 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-900/50'
+                    )}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-extrabold text-violet-600 dark:text-violet-400">DSA</span>
+                      <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                    </div>
+                    <p className="mt-2 text-xs font-bold text-slate-900 dark:text-white">Data Structures</p>
+                    <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">Live Voice & Coding</p>
+                  </div>
+
+                  {/* RESUME Option (Coming Soon) */}
+                  <div
+                    className="relative flex cursor-not-allowed opacity-60 flex-col justify-between rounded-xl border border-slate-200 bg-slate-100/50 p-3.5 dark:border-slate-800 dark:bg-slate-900/30"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-extrabold text-slate-400">RESUME</span>
+                      <span className="rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[9px] font-bold text-amber-500 border border-amber-500/30">
+                        Soon
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs font-bold text-slate-400">Resume Based</p>
+                    <p className="mt-1 text-[10px] text-slate-400">Coming Soon</p>
+                  </div>
+
+                  {/* BEHAVIORAL Option (Coming Soon) */}
+                  <div
+                    className="relative flex cursor-not-allowed opacity-60 flex-col justify-between rounded-xl border border-slate-200 bg-slate-100/50 p-3.5 dark:border-slate-800 dark:bg-slate-900/30"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-extrabold text-slate-400">BEHAVIORAL</span>
+                      <span className="rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[9px] font-bold text-amber-500 border border-amber-500/30">
+                        Soon
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs font-bold text-slate-400">Behavioral</p>
+                    <p className="mt-1 text-[10px] text-slate-400">Coming Soon</p>
+                  </div>
+                </div>
+
                 <select
                   id="interview-type-select"
                   value={interviewType}
@@ -172,9 +220,9 @@ export default function InterviewSetupPage() {
                   disabled={isSubmitting}
                   className="w-full rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm text-slate-900 outline-none transition duration-200 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-100 dark:focus:border-violet-500"
                 >
-                  <option value="DSA">DSA</option>
-                  <option value="RESUME">RESUME</option>
-                  <option value="BEHAVIORAL">BEHAVIORAL</option>
+                  <option value="DSA">DSA (Voice & Coding Active)</option>
+                  <option value="RESUME" disabled>RESUME (Coming Soon)</option>
+                  <option value="BEHAVIORAL" disabled>BEHAVIORAL (Coming Soon)</option>
                 </select>
               </div>
 

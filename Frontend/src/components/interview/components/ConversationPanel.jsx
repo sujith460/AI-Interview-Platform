@@ -12,10 +12,13 @@ export default function ConversationPanel({
   isLoading = false,
   isSending = false,
   isAiTyping = false,
+  isAiSpeaking = false,
   error = '',
   sendError = '',
   welcomeMessage = '',
   onSendMessage,
+  isMicOn = true,
+  onToggleMic,
   className,
 }) {
   return (
@@ -71,7 +74,10 @@ export default function ConversationPanel({
         onSendMessage={onSendMessage}
         isSending={isSending}
         isAiTyping={isAiTyping}
+        isAiSpeaking={isAiSpeaking}
         disabled={isLoading}
+        isMicOn={isMicOn}
+        onToggleMic={onToggleMic}
       />
     </div>
   );

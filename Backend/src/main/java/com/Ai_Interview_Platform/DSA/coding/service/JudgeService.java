@@ -6,10 +6,8 @@ import com.Ai_Interview_Platform.DSA.coding.dto.judge.RunCodeResponseDTO;
 import com.Ai_Interview_Platform.DSA.coding.dto.judge.SubmitCodeRequestDTO;
 import com.Ai_Interview_Platform.DSA.coding.dto.judge.SubmitCodeResponseDTO;
 import com.Ai_Interview_Platform.DSA.coding.dto.judge.TestCaseResultDTO;
-import com.Ai_Interview_Platform.DSA.coding.dto.piston.FileDTO;
-import com.Ai_Interview_Platform.DSA.coding.dto.piston.PistonExecuteRequestDTO;
-import com.Ai_Interview_Platform.DSA.coding.dto.piston.PistonExecuteResponseDTO;
-import com.Ai_Interview_Platform.DSA.coding.dto.piston.RunDTO;
+import com.Ai_Interview_Platform.DSA.coding.dto.judge0.Judge0RequestDTO;
+import com.Ai_Interview_Platform.DSA.coding.dto.judge0.Judge0ResponseDTO;
 import com.Ai_Interview_Platform.DSA.coding.enums.SupportedLanguage;
 import com.Ai_Interview_Platform.DSA.coding.util.JudgeCodeBuilder;
 import com.Ai_Interview_Platform.DSA.languagetemplate.entity.LanguageTemplate;
@@ -33,7 +31,7 @@ public class JudgeService {
 
     private final QuestionRepository questionRepository;
 
-    private final WebClient pistonWebClient;
+    private final WebClient judge0WebClient;
 
     private final JudgeCodeBuilder judgeCodeBuilder;
 
@@ -60,7 +58,7 @@ public class JudgeService {
     }
 
     // ------------------------------------------------------------------ //
-    //  Existing helpers (unchanged)                                      //
+    //  Existing helpers                                                  //
     // ------------------------------------------------------------------ //
 
     private Question getQuestion(Long questionId) {
@@ -82,26 +80,18 @@ public class JudgeService {
                         new RuntimeException("Language template not found"));
     }
 
-    private PistonExecuteRequestDTO buildRequest(
+    private Judge0RequestDTO buildRequest(
             String language,
             String sourceCode,
             String input
     ) {
-        SupportedLanguage supportedLanguage =
-                SupportedLanguage.from(language);
+        SupportedLanguage supportedLanguage = SupportedLanguage.from(language);
 
-        FileDTO file = new FileDTO();
-        file.setContent(sourceCode);
-
-        PistonExecuteRequestDTO request =
-                new PistonExecuteRequestDTO();
-
-        request.setLanguage(supportedLanguage.getPistonLanguage());
-        request.setVersion(supportedLanguage.getVersion());
-        request.setStdin(input);
-        request.setFiles(List.of(file));
-
-        return request;
+        return Judge0RequestDTO.builder()
+                .sourceCode(sourceCode)
+                .languageId(supportedLanguage.getJudge0LanguageId())
+                .stdin(input)
+                .build();
     }
 
     private List<TestCase> getSampleTestCases(Question question) {
@@ -140,61 +130,70 @@ public class JudgeService {
         return judgeCodeBuilder.buildCode(userCode, template.getDriverCode());
     }
 
-
     private boolean outputsMatch(String actual, String expected) {
         String normalizedActual = actual != null ? actual.strip() : "";
         String normalizedExpected = expected != null ? expected.strip() : "";
         return normalizedActual.equals(normalizedExpected);
     }
 
-
-    private String stdoutOf(RunDTO run) {
-        return run != null && run.getStdout() != null
-                ? run.getStdout().strip()
-                : "";
-    }
-
-
-    private String stderrOf(RunDTO run) {
-        return run != null && run.getStderr() != null
-                ? run.getStderr().strip()
-                : "";
-    }
-
-
-    private boolean hasNonZeroExit(RunDTO run) {
-        return run != null && run.getCode() != null && run.getCode() != 0;
-    }
-
-
-    private boolean hasCompileError(PistonExecuteResponseDTO response) {
+    private boolean isCompilationError(Judge0ResponseDTO response) {
         return response != null
-                && response.getCompile() != null
-                && hasNonZeroExit(response.getCompile());
+                && response.getStatus() != null
+                && response.getStatus().getId() != null
+                && response.getStatus().getId() == 6;
     }
 
+    private boolean isRuntimeErrorOrTle(Judge0ResponseDTO response) {
+        if (response == null || response.getStatus() == null || response.getStatus().getId() == null) {
+            return false;
+        }
+        int statusId = response.getStatus().getId();
+        return statusId == 5 || statusId >= 7;
+    }
 
-    private PistonExecuteResponseDTO executeSafe(PistonExecuteRequestDTO request) {
+    private String stdoutOf(Judge0ResponseDTO response) {
+        return response != null && response.getStdout() != null
+                ? response.getStdout().strip()
+                : "";
+    }
+
+    private String stderrOf(Judge0ResponseDTO response) {
+        if (response == null) return "";
+        if (response.getStderr() != null && !response.getStderr().isBlank()) {
+            return response.getStderr().strip();
+        }
+        if (response.getCompileOutput() != null && !response.getCompileOutput().isBlank()) {
+            return response.getCompileOutput().strip();
+        }
+        if (response.getMessage() != null && !response.getMessage().isBlank()) {
+            return response.getMessage().strip();
+        }
+        return "";
+    }
+
+    private Judge0ResponseDTO executeSafe(Judge0RequestDTO request) {
         try {
-            return pistonWebClient
+            return judge0WebClient
                     .post()
-                    .uri("/api/v2/execute")
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/submissions")
+                            .queryParam("base64_encoded", "false")
+                            .queryParam("wait", "true")
+                            .build())
                     .bodyValue(request)
                     .retrieve()
-                    .bodyToMono(PistonExecuteResponseDTO.class)
+                    .bodyToMono(Judge0ResponseDTO.class)
                     .block();
         } catch (WebClientResponseException e) {
             throw new RuntimeException(
-                    "Execution engine returned error "
+                    "Judge0 execution engine returned error "
                             + e.getStatusCode() + ": "
                             + e.getResponseBodyAsString(), e);
         } catch (Exception e) {
             throw new RuntimeException(
-                    "Execution engine unavailable: " + e.getMessage(), e);
+                    "Judge0 execution engine unavailable: " + e.getMessage(), e);
         }
     }
-
-
 
     private static class TestCaseResult {
         final boolean passed;
@@ -218,92 +217,143 @@ public class JudgeService {
         }
     }
 
-    private TestCaseResult executeTestCase(
+    private List<TestCaseResult> executeBatchTestCase(
             String language,
             String fullCode,
-            TestCase testCase
+            List<TestCase> testCases
     ) {
-        PistonExecuteRequestDTO request = buildRequest(
-                language, fullCode, testCase.getInput()
+        String combinedInput = testCases.stream()
+                .map(TestCase::getInput)
+                .collect(java.util.stream.Collectors.joining("\n---TESTCASE---\n"));
+
+        Judge0RequestDTO request = buildRequest(
+                language, fullCode, combinedInput
         );
 
-        PistonExecuteResponseDTO response;
+        Judge0ResponseDTO response;
         try {
             response = executeSafe(request);
         } catch (Exception e) {
-            return new TestCaseResult(
-                    false,
-                    SubmissionStatus.RUNTIME_ERROR,
-                    "",
-                    "Execution engine unavailable: " + e.getMessage(),
-                    ""
-            );
-        }
-
-        RunDTO run = response.getRun();
-        String runStderr = stderrOf(run);
-
-
-        if (hasCompileError(response)) {
-            String detail = stderrOf(response.getCompile());
-            if (detail.isEmpty()) {
-                detail = "Compilation failed with exit code "
-                        + response.getCompile().getCode();
+            List<TestCaseResult> errorResults = new ArrayList<>();
+            for (TestCase tc : testCases) {
+                errorResults.add(new TestCaseResult(
+                        false,
+                        SubmissionStatus.RUNTIME_ERROR,
+                        "",
+                        "Judge0 execution engine unavailable: " + e.getMessage(),
+                        ""
+                ));
             }
-            return new TestCaseResult(
-                    false,
-                    SubmissionStatus.COMPILATION_ERROR,
-                    "",
-                    detail,
-                    runStderr
-            );
+            return errorResults;
         }
 
-
-        if (run == null) {
-            return new TestCaseResult(
-                    false,
-                    SubmissionStatus.RUNTIME_ERROR,
-                    "",
-                    "No response from execution engine",
-                    ""
-            );
-        }
-
-        if (hasNonZeroExit(run)) {
-            String detail = runStderr;
-            if (detail.isEmpty()) {
-                detail = "Process exited with code " + run.getCode();
+        if (response == null) {
+            List<TestCaseResult> errorResults = new ArrayList<>();
+            for (TestCase tc : testCases) {
+                errorResults.add(new TestCaseResult(
+                        false,
+                        SubmissionStatus.RUNTIME_ERROR,
+                        "",
+                        "No response from Judge0 execution engine",
+                        ""
+                ));
             }
-            return new TestCaseResult(
-                    false,
-                    SubmissionStatus.RUNTIME_ERROR,
-                    stdoutOf(run),
-                    detail,
-                    runStderr
-            );
+            return errorResults;
         }
 
+        String errDetail = stderrOf(response);
 
-        String actual = stdoutOf(run);
-        String expected = Optional.ofNullable(testCase.getExpectedOutput())
-                .map(String::strip)
-                .orElse("");
-
-        if (!outputsMatch(actual, expected)) {
-            return new TestCaseResult(
-                    false,
-                    SubmissionStatus.WRONG_ANSWER,
-                    actual.isEmpty() ? "(no output)" : actual,
-                    "",
-                    runStderr
-            );
+        if (isCompilationError(response)) {
+            String detail = !errDetail.isEmpty() ? errDetail : "Compilation failed";
+            List<TestCaseResult> errorResults = new ArrayList<>();
+            for (TestCase tc : testCases) {
+                errorResults.add(new TestCaseResult(
+                        false,
+                        SubmissionStatus.COMPILATION_ERROR,
+                        "",
+                        detail,
+                        errDetail
+                ));
+            }
+            return errorResults;
         }
 
-        return new TestCaseResult(true, null, actual, "", "");
+        if (isRuntimeErrorOrTle(response)) {
+            String statusDesc = response.getStatus() != null && response.getStatus().getDescription() != null
+                    ? response.getStatus().getDescription()
+                    : "Runtime Error";
+            String detail = !errDetail.isEmpty() ? errDetail : statusDesc;
+            
+            String stdout = stdoutOf(response);
+            String[] outputs = stdout.split("---OUTPUT---");
+            List<TestCaseResult> results = new ArrayList<>();
+            
+            for (int i = 0; i < testCases.size(); i++) {
+                TestCase tc = testCases.get(i);
+                if (i < outputs.length && !outputs[i].trim().isEmpty() && !outputs[i].trim().startsWith("ERROR")) {
+                    String actual = outputs[i].trim();
+                    String expected = Optional.ofNullable(tc.getExpectedOutput())
+                            .map(String::strip)
+                            .orElse("");
+                    boolean passed = outputsMatch(actual, expected);
+                    results.add(new TestCaseResult(
+                            passed,
+                            passed ? null : SubmissionStatus.WRONG_ANSWER,
+                            actual,
+                            "",
+                            ""
+                    ));
+                } else {
+                    results.add(new TestCaseResult(
+                            false,
+                            SubmissionStatus.RUNTIME_ERROR,
+                            "",
+                            detail,
+                            errDetail
+                    ));
+                }
+            }
+            return results;
+        }
+
+        String stdout = stdoutOf(response);
+        String[] outputs = stdout.split("---OUTPUT---");
+        List<TestCaseResult> results = new ArrayList<>();
+
+        for (int i = 0; i < testCases.size(); i++) {
+            TestCase tc = testCases.get(i);
+            String actual = "";
+            if (i < outputs.length) {
+                actual = outputs[i].trim();
+            }
+            
+            String expected = Optional.ofNullable(tc.getExpectedOutput())
+                    .map(String::strip)
+                    .orElse("");
+
+            if (actual.startsWith("ERROR")) {
+                results.add(new TestCaseResult(
+                        false,
+                        SubmissionStatus.RUNTIME_ERROR,
+                        "",
+                        actual,
+                        errDetail
+                ));
+            } else if (!outputsMatch(actual, expected)) {
+                results.add(new TestCaseResult(
+                        false,
+                        SubmissionStatus.WRONG_ANSWER,
+                        actual.isEmpty() ? "(no output)" : actual,
+                        "",
+                        errDetail
+                ));
+            } else {
+                results.add(new TestCaseResult(true, null, actual, "", ""));
+            }
+        }
+
+        return results;
     }
-
-
 
     private double getSimulatedMemory(String language) {
         String lang = language.toUpperCase();
@@ -316,7 +366,6 @@ public class JudgeService {
         };
         return Math.round((base + Math.random() * 4.0) * 10.0) / 10.0;
     }
-
 
     private SubmitCodeResponseDTO buildFailureResponse(
             TestCaseResult result,
@@ -347,8 +396,6 @@ public class JudgeService {
                 .build();
     }
 
-
-
     public RunCodeResponseDTO runCode(RunCodeRequestDTO request) {
 
         Question question = getQuestion(request.getQuestionId());
@@ -368,39 +415,23 @@ public class JudgeService {
                     .build();
         }
 
+        List<TestCaseResult> results = executeBatchTestCase(
+                request.getLanguage(), fullCode, sampleTests
+        );
+
         StringBuilder outputBuilder = new StringBuilder();
         StringBuilder errorBuilder = new StringBuilder();
         List<TestCaseResultDTO> testCaseResults = new ArrayList<>();
         boolean allPassed = true;
-        boolean compErrorEncountered = false;
-        String compErrorDetail = "";
 
-        for (TestCase testCase : sampleTests) {
-            if (compErrorEncountered) {
-                testCaseResults.add(TestCaseResultDTO.builder()
-                        .orderIndex(testCase.getOrderIndex())
-                        .input(testCase.getInput())
-                        .expectedOutput(testCase.getExpectedOutput())
-                        .actualOutput("")
-                        .passed(false)
-                        .status(SubmissionStatus.COMPILATION_ERROR.getDisplayName())
-                        .error(compErrorDetail)
-                        .build());
-                continue;
-            }
-
-            TestCaseResult result = executeTestCase(
-                    request.getLanguage(), fullCode, testCase
-            );
+        for (int i = 0; i < sampleTests.size(); i++) {
+            TestCase testCase = sampleTests.get(i);
+            TestCaseResult result = results.get(i);
 
             String status = "Accepted";
             if (!result.passed) {
                 allPassed = false;
                 status = result.status.getDisplayName();
-                if (result.status == SubmissionStatus.COMPILATION_ERROR) {
-                    compErrorEncountered = true;
-                    compErrorDetail = result.errorDetail;
-                }
             }
 
             testCaseResults.add(TestCaseResultDTO.builder()
@@ -425,8 +456,8 @@ public class JudgeService {
                     case RUNTIME_ERROR ->
                             outputBuilder.append(String.format(
                                     "Test case %d — Runtime Error:%n"
-                                            + "Input: %s%n"
-                                            + "Error: %s%n%n",
+                                             + "Input: %s%n"
+                                             + "Error: %s%n%n",
                                     testCase.getOrderIndex(),
                                     testCase.getInput(),
                                     result.errorDetail
@@ -435,9 +466,9 @@ public class JudgeService {
                     case WRONG_ANSWER ->
                             outputBuilder.append(String.format(
                                     "Test case %d — Wrong Answer:%n"
-                                            + "Input: %s%n"
-                                            + "Expected: %s%n"
-                                            + "Actual: %s%n%n",
+                                             + "Input: %s%n"
+                                             + "Expected: %s%n"
+                                             + "Actual: %s%n%n",
                                     testCase.getOrderIndex(),
                                     testCase.getInput(),
                                     testCase.getExpectedOutput(),
@@ -447,7 +478,7 @@ public class JudgeService {
                     default -> { /* not reachable */ }
                 }
 
-                if (!result.stderr.isEmpty()) {
+                if (result.stderr != null && !result.stderr.isEmpty()) {
                     errorBuilder.append("Stderr for test case ")
                             .append(testCase.getOrderIndex())
                             .append(": ").append(result.stderr)
@@ -489,24 +520,26 @@ public class JudgeService {
                     .build();
         }
 
-        int passedCount = 0;
         long startTime = System.currentTimeMillis();
+        List<TestCaseResult> results = executeBatchTestCase(
+                request.getLanguage(), fullCode, allTests
+        );
+
+        int passedCount = 0;
         TestCaseResult finalFailureResult = null;
         TestCase failedTestCaseEntity = null;
 
-        for (TestCase testCase : allTests) {
-            TestCaseResult result = executeTestCase(
-                    request.getLanguage(), fullCode, testCase
-            );
+        for (int i = 0; i < allTests.size(); i++) {
+            TestCase testCase = allTests.get(i);
+            TestCaseResult result = results.get(i);
 
             if (result.passed) {
                 passedCount++;
-                continue;
+            } else {
+                finalFailureResult = result;
+                failedTestCaseEntity = testCase;
+                break;
             }
-
-            finalFailureResult = result;
-            failedTestCaseEntity = testCase;
-            break;
         }
 
         long endTime = System.currentTimeMillis();

@@ -16,7 +16,11 @@ public class RegisterRequestDTO {
     private String email;
 
     @NotBlank(message = "Password is required")
-    @Size(min = 6, message = "Password must be atleast 6 characters")
+    @Size(min = 6, message = "Password must be at least 6 characters")
     private String password;
 
+    /** 6-digit OTP the user entered on the verification screen. Required for final registration. */
+    @NotBlank(message = "Verification code is required")
+    @Size(min = 6, max = 6, message = "Verification code must be exactly 6 digits")
+    private String otp;
 }

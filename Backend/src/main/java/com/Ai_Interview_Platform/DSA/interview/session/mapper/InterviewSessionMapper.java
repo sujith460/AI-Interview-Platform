@@ -11,6 +11,7 @@ public interface InterviewSessionMapper {
     @Mapping(source = "id", target = "sessionId")
     @Mapping(source = "company.id", target = "companyId")
     @Mapping(source = "company.name", target = "companyName")
+    @Mapping(source = "company.logoUrl", target = "companyLogoUrl")
     InterviewSessionResponseDTO toResponseDTO(InterviewSession interviewSession);
 
 }

@@ -8,6 +8,7 @@ import useCurrentUser from '@/hooks/user/useCurrentUser';
 import { TOKEN_KEY } from '@/utils/constants/auth';
 import { UPCOMING_FEATURES } from '@/utils/constants/dashboard';
 import { cn } from '@/utils/helpers/cn';
+import { calculateProfileCompletion } from '@/utils/helpers/profileCompletion';
 
 export default function DashboardPage() {
   const navigate = useNavigate();
@@ -123,13 +124,7 @@ export default function DashboardPage() {
                     </div>
                     <div className="text-right">
                       <span className="text-lg font-extrabold text-slate-900 dark:text-white">
-                        {(() => {
-                          const savedAvatar = localStorage.getItem('profile_avatar');
-                          const savedResume = localStorage.getItem('profile_resume');
-                          const fields = [user.fullName, user.email, savedAvatar, savedResume];
-                          const filled = fields.filter(Boolean).length;
-                          return Math.round((filled / fields.length) * 100);
-                        })()}%
+                        {calculateProfileCompletion(user)}%
                       </span>
                     </div>
                   </div>
@@ -140,7 +135,7 @@ export default function DashboardPage() {
             <section>
               <div className="mb-6">
                 <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-                  Quick Actions & Modules
+                  Quick Actions &amp; Modules
                 </h2>
                 <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                   Select a practice module to begin your technical preparation.
@@ -149,18 +144,21 @@ export default function DashboardPage() {
 
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {UPCOMING_FEATURES.map(({ title, description, icon: Icon, accent, statusClass }) => {
-                  let onClick = null;
-                  let actionText = null;
-                  let isButton = false;
-                  if (title === 'AI Interview') {
-                    onClick = () => navigate('/interview/start');
-                    actionText = 'Start Interview';
-                    isButton = true;
-                  } else if (title === 'Practice Coding') {
-                    onClick = () => navigate('/practice');
-                  } else if (title === 'Profile') {
-                    onClick = () => navigate('/profile');
-                  }
+                  // Derive action config from title
+                  const config = (() => {
+                    if (title === 'AI Interview')
+                      return { onClick: () => navigate('/interview/start'), label: 'Start Interview', btnGradient: 'from-violet-600 via-indigo-600 to-purple-700', shadow: 'shadow-violet-500/30' };
+                    if (title === 'Practice Coding')
+                      return { onClick: () => navigate('/practice'), label: 'Get Started', btnGradient: 'from-indigo-600 via-blue-600 to-indigo-700', shadow: 'shadow-indigo-500/30' };
+                    if (title === 'Interview History')
+                      return { onClick: () => navigate('/interview/history'), label: 'View History', btnGradient: 'from-emerald-600 via-teal-600 to-emerald-700', shadow: 'shadow-emerald-500/30' };
+                    if (title === 'Profile')
+                      return { onClick: () => navigate('/profile'), label: 'Manage Profile', btnGradient: 'from-amber-500 via-orange-500 to-amber-600', shadow: 'shadow-amber-500/30' };
+                    if (title === 'Analytics')
+                      return { onClick: () => navigate('/analytics'), label: 'View Analytics', btnGradient: 'from-cyan-600 via-sky-600 to-blue-700', shadow: 'shadow-cyan-500/30' };
+                    return null;
+                  })();
+
                   return (
                     <DashboardCard
                       key={title}
@@ -168,9 +166,7 @@ export default function DashboardPage() {
                       description={description}
                       accent={accent}
                       statusClass={statusClass}
-                      onClick={onClick}
-                      actionText={actionText}
-                      isButton={isButton}
+                      config={config}
                     >
                       <Icon />
                     </DashboardCard>
@@ -196,52 +192,81 @@ function ProfileField({ label, value, className }) {
   );
 }
 
-function DashboardCard({ title, description, accent, statusClass, onClick, actionText, isButton, children }) {
-  const isActive = !!onClick;
+function DashboardCard({ title, description, accent, statusClass, config, children }) {
+  const isActive = !!config;
+
   return (
     <Card
-      onClick={onClick}
+      onClick={isActive ? config.onClick : undefined}
       className={cn(
-        "p-5 transition-all duration-200 border border-slate-200/60 dark:border-white/5 flex flex-col justify-between",
-        isActive 
-          ? "cursor-pointer hover:-translate-y-1 hover:shadow-lg dark:hover:border-violet-500/30 dark:hover:bg-white/[0.03] hover:border-violet-500/20" 
-          : "opacity-90"
+        'group relative overflow-hidden p-5 transition-all duration-300 border flex flex-col justify-between',
+        isActive
+          ? 'cursor-pointer border-slate-200/60 dark:border-white/5 hover:-translate-y-1.5 hover:shadow-xl dark:hover:border-violet-500/20 dark:hover:bg-white/[0.025] hover:border-violet-400/30'
+          : 'border-slate-200/40 dark:border-white/5 opacity-80'
       )}
       aria-disabled={!isActive}
     >
-      <div>
+      {/* Subtle hover glow */}
+      {isActive && (
         <div
-          className={`mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br ${accent} text-white shadow-lg`}
-        >
-          {children}
+          className={`absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none rounded-2xl bg-gradient-to-br ${accent} blur-2xl`}
+          style={{ opacity: 0 }}
+        />
+      )}
+
+      <div className="relative">
+        {/* Icon Container with Diagonal Ribbon for Inactive Modules */}
+        <div className="relative inline-block mb-4">
+          <div
+            className={`flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br ${accent} text-white shadow-lg transition-transform duration-300 group-hover:scale-105 overflow-hidden relative`}
+          >
+            {children}
+
+            {/* Diagonal COMING SOON Ribbon overlay matching reference UI screenshot */}
+            {!isActive && (
+              <div className="absolute inset-0 overflow-hidden pointer-events-none rounded-2xl">
+                <div className="absolute top-[8px] -left-[28px] w-[95px] -rotate-45 bg-black/95 border-y border-white/20 py-[1px] text-[7px] font-black tracking-widest text-white text-center shadow-lg uppercase leading-tight">
+                  COMING SOON
+                </div>
+              </div>
+            )}
+          </div>
         </div>
-        <h3 className="font-semibold text-slate-900 dark:text-white">{title}</h3>
+
+        <h3 className="font-bold text-slate-900 dark:text-white tracking-tight">{title}</h3>
         <p className="mt-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
           {description}
         </p>
       </div>
-      {isButton ? (
-        <div className="mt-4">
-          <Button
-            size="sm"
-            className="w-full text-xs shadow-none"
+
+      {/* Action Area */}
+      {isActive ? (
+        <div className="mt-5 relative">
+          <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
-              if (onClick) onClick();
+              config.onClick();
             }}
+            className={cn(
+              'w-full h-10 flex items-center justify-center gap-2 rounded-xl text-xs font-bold text-white',
+              'bg-gradient-to-r shadow-md transition-all duration-200',
+              'hover:scale-[1.02] hover:shadow-lg active:scale-[0.98]',
+              config.btnGradient,
+              config.shadow
+            )}
           >
-            {actionText || 'Start Interview'}
-          </Button>
+            {config.label}
+            <svg className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1 duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
+            </svg>
+          </button>
         </div>
-      ) : isActive ? (
-        <p className="mt-4 text-xs font-bold text-violet-600 dark:text-violet-400 flex items-center gap-1">
-          {actionText || 'Get Started'}
-          <svg className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
-          </svg>
-        </p>
       ) : (
-        <p className={`mt-4 text-xs font-medium ${statusClass}`}>Coming Soon</p>
+        <div className="mt-5 flex items-center gap-2">
+          <span className="h-1.5 w-1.5 rounded-full bg-amber-500/80 animate-pulse" />
+          <p className="text-[11px] font-bold text-amber-600 dark:text-amber-400 tracking-wide">Coming Soon</p>
+        </div>
       )}
     </Card>
   );

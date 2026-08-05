@@ -54,6 +54,17 @@ public class InterviewSession {
 
     private String programmingLanguage;
 
+    @Column(length = 100)
+    private String role;
+
+    private Integer overallScore;
+
+    @Column(columnDefinition = "TEXT")
+    private String finalEvaluation;
+
+    @Column(columnDefinition = "TEXT")
+    private String aiFeedback;
+
     private LocalDateTime startedAt;
 
     private LocalDateTime endedAt;

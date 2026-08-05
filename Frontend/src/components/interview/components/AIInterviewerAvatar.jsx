@@ -67,9 +67,12 @@ export default function AIInterviewerAvatar({
               cx="50"
               cy="55"
               rx={isSpeaking ? 7 : 5}
-              ry={isSpeaking ? 3.5 : 2}
+              ry={isSpeaking ? 4 : 2}
               fill="#9d4b4b"
-              className="transition-all duration-150"
+              style={{
+                animation: isSpeaking ? 'lipTalk 0.25s infinite alternate ease-in-out' : 'none',
+                transformOrigin: '50px 55px',
+              }}
             />
             {/* Collar / shirt */}
             <path
@@ -89,8 +92,14 @@ export default function AIInterviewerAvatar({
               {[1, 2, 3].map((i) => (
                 <span
                   key={i}
-                  className="absolute inset-0 rounded-full border border-violet-400/30 animate-ping"
-                  style={{ animationDelay: `${i * 180}ms`, animationDuration: '1.2s' }}
+                  className="absolute inset-0 rounded-full border border-violet-400/40"
+                  style={{
+                    animationName: 'ping',
+                    animationDuration: '1.2s',
+                    animationTimingFunction: 'cubic-bezier(0, 0, 0.2, 1)',
+                    animationIterationCount: 'infinite',
+                    animationDelay: `${i * 180}ms`,
+                  }}
                 />
               ))}
             </div>
@@ -99,56 +108,66 @@ export default function AIInterviewerAvatar({
       </div>
 
       {/* Name & title */}
-      <div className="relative mt-4 text-center z-10">
+      <div className="relative mt-3 text-center z-10">
         <p className="text-sm font-extrabold text-white tracking-tight">{name}</p>
         <p className="text-[10px] text-violet-300 font-medium mt-0.5">{title}</p>
       </div>
 
       {/* Status badge */}
-      <div className="relative mt-3 z-10">
+      <div className="relative mt-2.5 z-10">
         <span
           className={cn(
-            'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold border transition-colors duration-300',
+            'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-bold border transition-colors duration-300 shadow-sm',
             isSpeaking
-              ? 'bg-violet-600/25 border-violet-500/50 text-violet-200'
+              ? 'bg-violet-600/30 border-violet-400/60 text-violet-200 ring-2 ring-violet-500/20'
               : 'bg-slate-800/80 border-slate-700/60 text-slate-400'
           )}
         >
           <span
             className={cn(
-              'h-1.5 w-1.5 rounded-full',
-              isSpeaking ? 'bg-violet-400 animate-pulse' : 'bg-emerald-500'
+              'h-2 w-2 rounded-full',
+              isSpeaking ? 'bg-violet-400 animate-ping' : 'bg-emerald-500'
             )}
           />
-          {isSpeaking ? 'Speaking…' : 'Listening'}
+          {isSpeaking ? 'AI Speaking...' : 'Listening to Candidate'}
         </span>
       </div>
 
       {/* Sound wave bars — animated when speaking */}
-      <div className="relative mt-4 flex items-end gap-0.5 h-8 z-10">
-        {[0.4, 0.7, 1, 0.8, 0.5, 0.9, 0.6, 1, 0.7, 0.4].map((scale, i) => (
+      <div className="relative mt-3 flex items-end gap-1 h-7 z-10">
+        {[0.4, 0.7, 1, 0.8, 0.5, 0.9, 0.6, 1, 0.7, 0.4, 0.8, 0.5].map((scale, i) => (
           <span
             key={i}
             className={cn(
-              'w-1 rounded-full transition-all',
-              isSpeaking ? 'bg-violet-400' : 'bg-slate-700'
+              'w-1 rounded-full transition-all duration-150',
+              isSpeaking ? 'bg-gradient-to-t from-violet-600 to-indigo-400 shadow-xs' : 'bg-slate-700'
             )}
             style={{
-              height: isSpeaking ? `${Math.round(scale * 28)}px` : '4px',
-              animation: isSpeaking
-                ? `soundBar 0.8s ease-in-out infinite alternate`
-                : 'none',
-              animationDelay: `${i * 60}ms`,
+              height: isSpeaking ? `${Math.round(scale * 24)}px` : '4px',
+              ...(isSpeaking
+                ? {
+                    animationName: 'soundBar',
+                    animationDuration: '0.5s',
+                    animationTimingFunction: 'ease-in-out',
+                    animationIterationCount: 'infinite',
+                    animationDirection: 'alternate',
+                    animationDelay: `${i * 45}ms`,
+                  }
+                : {}),
             }}
           />
         ))}
       </div>
 
-      {/* Inline keyframes for sound bar animation */}
+      {/* Inline keyframes for sound bar and lip talk animation */}
       <style>{`
         @keyframes soundBar {
-          0%   { transform: scaleY(0.3); }
+          0%   { transform: scaleY(0.2); }
           100% { transform: scaleY(1); }
+        }
+        @keyframes lipTalk {
+          0%   { transform: scale(0.9, 0.8); }
+          100% { transform: scale(1.15, 1.3); }
         }
       `}</style>
     </div>

@@ -5,27 +5,25 @@ import lombok.Getter;
 @Getter
 public enum SupportedLanguage {
 
-    JAVA("java", "15"),
-    PYTHON("python", "3.12.0"),
-    CPP("c++", "10.0.5"),
-    JAVASCRIPT("javascript", "18");
+    JAVA("java", 62),
+    PYTHON("python", 71),
+    CPP("c++", 54),
+    JAVASCRIPT("javascript", 63),
+    GO("go", 60);
 
-    private final String pistonLanguage;
-    private final String version;
+    private final String languageName;
+    private final int judge0LanguageId;
 
-    SupportedLanguage(String pistonLanguage, String version) {
-        this.pistonLanguage = pistonLanguage;
-        this.version = version;
+    SupportedLanguage(String languageName, int judge0LanguageId) {
+        this.languageName = languageName;
+        this.judge0LanguageId = judge0LanguageId;
     }
 
     public static SupportedLanguage from(String language) {
-
         try {
             return SupportedLanguage.valueOf(language.toUpperCase());
         } catch (IllegalArgumentException ex) {
             throw new RuntimeException("Unsupported language : " + language);
         }
-
     }
-
 }

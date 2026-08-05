@@ -19,6 +19,10 @@ public class InterviewSessionResponseDTO {
 
     private String companyName;
 
+    private String companyLogoUrl;
+
+    private String role;
+
     private InterviewType interviewType;
 
     private Difficulty difficulty;
@@ -32,6 +36,14 @@ public class InterviewSessionResponseDTO {
     private String currentQuestion;
 
     private String programmingLanguage;
+
+    private Integer overallScore;
+
+    private String finalEvaluation;
+
+    private String aiFeedback;
+
+    private Long durationMinutes;
 
     private LocalDateTime startedAt;
 

@@ -28,7 +28,7 @@ NEETCODE_150_URL = "https://raw.githubusercontent.com/krmanik/Anki-NeetCode/main
 # Database Configuration
 DB_HOST = "localhost"
 DB_PORT = 5432
-DB_NAME = "ai_interview_platform"
+DB_NAME = "Ai_Interview_Platform"
 DB_USER = "postgres"
 DB_PASS = "sujith3005"
 
@@ -209,6 +209,636 @@ def get_est_minutes(diff_str):
         return 60
     else:
         return 40
+
+def parse_method_signature(snippet, language):
+    lines = snippet.splitlines()
+    method_name = None
+    params = []
+    return_type = "void"
+    
+    if language == "python3" or language == "python":
+        for line in lines:
+            line = line.strip()
+            if line.startswith("def "):
+                match = re.search(r'def\s+(\w+)\s*\(\s*self\s*,\s*(.*?)\s*\)', line)
+                if match:
+                    method_name = match.group(1)
+                    param_part = match.group(2)
+                    raw_params = re.split(r',\s*', param_part)
+                    for rp in raw_params:
+                        rp = rp.strip()
+                        if rp:
+                            pname = rp.split(':')[0].strip()
+                            params.append((pname, None))
+                    break
+    elif language == "javascript":
+        for line in lines:
+            line = line.strip()
+            match1 = re.search(r'(?:var|const|let|function)?\s*(\w+)\s*=\s*function\s*\(\s*(.*?)\s*\)', line)
+            if match1:
+                method_name = match1.group(1)
+                param_part = match1.group(2)
+                for p in param_part.split(','):
+                    p = p.strip()
+                    if p:
+                        params.append((p, None))
+                break
+            match2 = re.search(r'^\s*(\w+)\s*\(\s*(.*?)\s*\)\s*\{', line)
+            if match2:
+                method_name = match2.group(1)
+                param_part = match2.group(2)
+                for p in param_part.split(','):
+                    p = p.strip()
+                    if p:
+                        params.append((p, None))
+                break
+    elif language == "java":
+        for line in lines:
+            line = line.strip()
+            if "class " in line or "interface " in line:
+                continue
+            match = re.search(r'(?:public|protected|private|static|\s)+\s+([\w\<\>\[\]]+)\s+(\w+)\s*\(\s*(.*?)\s*\)\s*\{?', line)
+            if match:
+                return_type = match.group(1)
+                method_name = match.group(2)
+                param_part = match.group(3)
+                for p in param_part.split(','):
+                    p = p.strip()
+                    if p:
+                        parts = p.split()
+                        if len(parts) >= 2:
+                            pname = parts[-1].strip()
+                            ptype = " ".join(parts[:-1]).strip()
+                            params.append((pname, ptype))
+                break
+    elif language == "cpp":
+        for line in lines:
+            line = line.strip()
+            if "class " in line or "public:" in line or "private:" in line:
+                continue
+            match = re.search(r'([\w\<\>\:\&\*\s]+)\s+(\w+)\s*\(\s*(.*?)\s*\)\s*\{?', line)
+            if match:
+                return_type = match.group(1).strip()
+                method_name = match.group(2)
+                param_part = match.group(3)
+                for p in param_part.split(','):
+                    p = p.strip()
+                    if p:
+                        parts = p.split()
+                        if len(parts) >= 2:
+                            pname = parts[-1].strip().replace("&", "").replace("*", "")
+                            ptype = " ".join(parts[:-1]).strip()
+                            params.append((pname, ptype))
+                break
+                
+    return method_name, params, return_type
+
+def get_java_parser_expr(ptype, index):
+    ptype = ptype.strip()
+    if ptype == "int":
+        return f"Integer.parseInt(vals.get({index}))"
+    elif ptype == "long":
+        return f"Long.parseLong(vals.get({index}))"
+    elif ptype == "double":
+        return f"Double.parseDouble(vals.get({index}))"
+    elif ptype == "boolean":
+        return f"Boolean.parseBoolean(vals.get({index}))"
+    elif ptype == "String":
+        return f"parseString(vals.get({index}))"
+    elif ptype == "int[]":
+        return f"parseStringToIntArray(vals.get({index}))"
+    elif ptype == "List<Integer>":
+        return f"parseStringToIntList(vals.get({index}))"
+    elif ptype == "ListNode":
+        return f"parseStringToLinkedList(vals.get({index}))"
+    return f"vals.get({index})"
+
+def get_java_serializer_expr(rtype, result_var):
+    rtype = rtype.strip()
+    if rtype == "ListNode":
+        return f"serializeLinkedList({result_var})"
+    elif rtype == "int[]":
+        return f"Arrays.toString({result_var}).replace(\" \", \"\")"
+    elif rtype.startswith("List"):
+        return f"{result_var}.toString().replace(\" \", \"\")"
+    elif rtype == "String":
+        return result_var
+    return f"String.valueOf({result_var})"
+
+def generate_java_driver(method_name, params, return_type):
+    parsing_lines = []
+    arg_names = []
+    for i, (pname, ptype) in enumerate(params):
+        parser_expr = get_java_parser_expr(ptype, i)
+        parsing_lines.append(f"{ptype} {pname} = {parser_expr};")
+        arg_names.append(pname)
+    
+    arg_list_str = ", ".join(arg_names)
+    
+    if return_type == "void":
+        call_line = f"sol.{method_name}({arg_list_str});"
+        serialize_line = "outputs.add(\"null\");"
+    else:
+        call_line = f"{return_type} res = sol.{method_name}({arg_list_str});"
+        serializer_expr = get_java_serializer_expr(return_type, "res")
+        serialize_line = f"outputs.add({serializer_expr});"
+        
+    parsing_block = "\n                ".join(parsing_lines)
+    
+    template = """
+// --- DRIVER CODE START ---
+import java.io.*;
+import java.util.*;
+
+class ListNode {
+    int val;
+    ListNode next;
+    ListNode() {}
+    ListNode(int val) { this.val = val; }
+    ListNode(int val, ListNode next) { this.val = val; this.next = next; }
+}
+
+public class Main {
+    private static String parseString(String s) {
+        s = s.trim();
+        if (s.startsWith("\\\"") && s.endsWith("\\\"")) {
+            return s.substring(1, s.length() - 1);
+        }
+        return s;
+    }
+    
+    private static int[] parseStringToIntArray(String s) {
+        s = s.trim();
+        if (s.startsWith("[") && s.endsWith("]")) {
+            s = s.substring(1, s.length() - 1).trim();
+        }
+        if (s.isEmpty()) return new int[0];
+        String[] parts = s.split(",");
+        int[] res = new int[parts.length];
+        for (int i = 0; i < parts.length; i++) {
+            res[i] = Integer.parseInt(parts[i].trim());
+        }
+        return res;
+    }
+    
+    private static List<Integer> parseStringToIntList(String s) {
+        int[] arr = parseStringToIntArray(s);
+        List<Integer> list = new ArrayList<>();
+        for (int x : arr) list.add(x);
+        return list;
+    }
+    
+    private static ListNode parseStringToLinkedList(String s) {
+        int[] arr = parseStringToIntArray(s);
+        if (arr.length == 0) return null;
+        ListNode dummy = new ListNode(0);
+        ListNode curr = dummy;
+        for (int x : arr) {
+            curr.next = new ListNode(x);
+            curr = curr.next;
+        }
+        return dummy.next;
+    }
+    
+    private static String serializeLinkedList(ListNode head) {
+        if (head == null) return "null";
+        List<Integer> list = new ArrayList<>();
+        ListNode curr = head;
+        while (curr != null) {
+            list.add(curr.val);
+            curr = curr.next;
+        }
+        return list.toString().replace(" ", "");
+    }
+
+    public static void main(String[] args) throws Exception {
+        BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
+        StringBuilder sb = new StringBuilder();
+        String line;
+        while ((line = br.readLine()) != null) {
+            sb.append(line).append("\\n");
+        }
+        String[] blocks = sb.toString().split("---TESTCASE---");
+        Solution sol = new Solution();
+        List<String> outputs = new ArrayList<>();
+        
+        for (String block : blocks) {
+            block = block.trim();
+            if (block.isEmpty()) continue;
+            List<String> vals = new ArrayList<>();
+            String[] assignmentLines = block.split("\\n");
+            for (String aLine : assignmentLines) {
+                aLine = aLine.trim();
+                if (aLine.contains("=")) {
+                    vals.add(aLine.split("=", 2)[1].trim());
+                }
+            }
+            
+            try {
+                {parsing_block}
+                {call_line}
+                {serialize_line}
+            } catch (Exception e) {
+                outputs.add("ERROR: " + e.getMessage());
+            }
+        }
+        
+        System.out.println(String.join("\\n---OUTPUT---\\n", outputs));
+    }
+}
+"""
+    return template.replace("{parsing_block}", parsing_block).replace("{call_line}", call_line).replace("{serialize_line}", serialize_line)
+
+def get_cpp_parser_expr(ptype, index):
+    ptype = ptype.strip().replace("const", "").replace("&", "").strip()
+    if ptype == "int":
+        return f"stoi(vals[{index}])"
+    elif ptype == "long" or ptype == "long long":
+        return f"stoll(vals[{index}])"
+    elif ptype == "double":
+        return f"stod(vals[{index}])"
+    elif ptype == "bool":
+        return f"(vals[{index}] == \\\"true\\\")"
+    elif ptype == "string":
+        return f"parseString(vals[{index}])"
+    elif ptype == "vector<int>":
+        return f"parseStringToIntVector(vals[{index}])"
+    elif ptype == "ListNode*":
+        return f"parseStringToLinkedList(vals[{index}])"
+    return f"vals[{index}]"
+
+def get_cpp_serializer_expr(rtype, result_var):
+    rtype = rtype.strip()
+    if rtype == "ListNode*":
+        return f"serializeLinkedList({result_var})"
+    elif rtype == "vector<int>":
+        return f"serializeVector({result_var})"
+    elif rtype == "string":
+        return result_var
+    return f"to_string({result_var})"
+
+def generate_cpp_driver(method_name, params, return_type):
+    parsing_lines = []
+    arg_names = []
+    for i, (pname, ptype) in enumerate(params):
+        parser_expr = get_cpp_parser_expr(ptype, i)
+        parsing_lines.append(f"{ptype} {pname} = {parser_expr};")
+        arg_names.append(pname)
+        
+    arg_list_str = ", ".join(arg_names)
+    
+    if return_type == "void":
+        call_line = f"sol.{method_name}({arg_list_str});"
+        serialize_line = "outputs.push_back(\"null\");"
+    else:
+        call_line = f"{return_type} res = sol.{method_name}({arg_list_str});"
+        serializer_expr = get_cpp_serializer_expr(return_type, "res")
+        serialize_line = f"outputs.push_back({serializer_expr});"
+        
+    parsing_block = "\n            ".join(parsing_lines)
+    
+    template = """
+// --- DRIVER CODE START ---
+#include <iostream>
+#include <vector>
+#include <string>
+#include <sstream>
+#include <algorithm>
+#include <map>
+
+using namespace std;
+
+struct ListNode {
+    int val;
+    ListNode *next;
+    ListNode() : val(0), next(nullptr) {}
+    ListNode(int x) : val(x), next(nullptr) {}
+    ListNode(int x, ListNode *next) : val(x), next(next) {}
+};
+
+struct TreeNode {
+    int val;
+    TreeNode *left;
+    TreeNode *right;
+    TreeNode() : val(0), left(nullptr), right(nullptr) {}
+    TreeNode(int x) : val(x), left(nullptr), right(nullptr) {}
+    TreeNode(int x, TreeNode *left, TreeNode *right) : val(x), left(left), right(right) {}
+};
+
+vector<int> parseStringToIntVector(string s) {
+    vector<int> res;
+    s.erase(remove(s.begin(), s.end(), ' '), s.end());
+    if (s.front() == '[') s.erase(s.begin());
+    if (s.back() == ']') s.pop_back();
+    if (s.empty()) return res;
+    stringstream ss(s);
+    string token;
+    while (getline(ss, token, ',')) {
+        res.push_back(stoi(token));
+    }
+    return res;
+}
+
+string parseString(string s) {
+    if (s.front() == '"') s.erase(s.begin());
+    if (s.back() == '"') s.pop_back();
+    return s;
+}
+
+string serializeLinkedList(ListNode* head) {
+    if (!head) return "null";
+    string res = "[";
+    while (head) {
+        res += to_string(head->val);
+        if (head->next) res += ",";
+        head = head->next;
+    }
+    res += "]";
+    return res;
+}
+
+string serializeVector(vector<int> vec) {
+    string res = "[";
+    for (size_t i = 0; i < vec.size(); ++i) {
+        res += to_string(vec[i]);
+        if (i < vec.size() - 1) res += ",";
+    }
+    res += "]";
+    return res;
+}
+
+int main() {
+    string raw_input, line;
+    while (getline(cin, line)) {
+        raw_input += line + "\\n";
+    }
+    
+    vector<string> blocks;
+    size_t pos = 0;
+    string delimiter = "---TESTCASE---";
+    while ((pos = raw_input.find(delimiter)) != string::npos) {
+        blocks.push_back(raw_input.substr(0, pos));
+        raw_input.erase(0, pos + delimiter.length());
+    }
+    blocks.push_back(raw_input);
+    
+    Solution sol;
+    vector<string> outputs;
+    
+    for (string block : blocks) {
+        block.erase(block.begin(), find_if(block.begin(), block.end(), [](unsigned char ch) {
+            return !isspace(ch);
+        }));
+        block.erase(find_if(block.rbegin(), block.rend(), [](unsigned char ch) {
+            return !isspace(ch);
+        }).base(), block.end());
+        if (block.empty()) continue;
+        
+        stringstream ss(block);
+        vector<string> vals;
+        string b_line;
+        while (getline(ss, b_line)) {
+            size_t eq = b_line.find('=');
+            if (eq != string::npos) {
+                vals.push_back(b_line.substr(eq + 1));
+            }
+        }
+        
+        try {
+            {parsing_block}
+            {call_line}
+            {serialize_line}
+        } catch (...) {
+            outputs.push_back("ERROR");
+        }
+    }
+    
+    for (size_t i = 0; i < outputs.size(); ++i) {
+        cout << outputs[i];
+        if (i < outputs.size() - 1) {
+            cout << "\\n---OUTPUT---\\n";
+        }
+    }
+    cout << endl;
+    return 0;
+}
+"""
+    return template.replace("{parsing_block}", parsing_block).replace("{call_line}", call_line).replace("{serialize_line}", serialize_line)
+
+def generate_python_driver(method_name, params):
+    param_names = [p[0] for p in params]
+    param_names_str = ", ".join([f'"{name}"' for name in param_names])
+    
+    template = """
+# --- DRIVER CODE START ---
+import sys
+import json
+
+class ListNode:
+    def __init__(self, val=0, next=None):
+        self.val = val
+        self.next = next
+
+class TreeNode:
+    def __init__(self, val=0, left=None, right=None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+def parse_input_block(block):
+    locs = {}
+    lines = [line.strip() for line in block.splitlines() if line.strip()]
+    for line in lines:
+        if '=' in line:
+            name, val = line.split('=', 1)
+            name = name.strip()
+            val = val.strip()
+            val = val.replace('true', 'True').replace('false', 'False').replace('null', 'None')
+            try:
+                locs[name] = eval(val)
+            except:
+                locs[name] = val
+    return locs
+
+def serialize_output(val):
+    if val is None:
+        return "null"
+    if hasattr(val, 'val') and hasattr(val, 'next'):
+        arr = []
+        curr = val
+        while curr:
+            arr.append(curr.val)
+            curr = curr.next
+        return json.dumps(arr)
+    if hasattr(val, 'val') and hasattr(val, 'left') and hasattr(val, 'right'):
+        if not val:
+            return "[]"
+        res = []
+        queue = [val]
+        while queue:
+            node = queue.pop(0)
+            if node:
+                res.append(node.val)
+                queue.append(node.left)
+                queue.append(node.right)
+            else:
+                res.append(None)
+        while res and res[-1] is None:
+            res.pop()
+        return json.dumps(res)
+    return json.dumps(val)
+
+def main():
+    raw_input = sys.stdin.read()
+    blocks = raw_input.split("---TESTCASE---")
+    sol = Solution()
+    outputs = []
+    
+    for block in blocks:
+        block = block.strip()
+        if not block:
+            continue
+        try:
+            locs = parse_input_block(block)
+            param_names = [{param_names_str}]
+            args = [locs[p] for p in param_names if p in locs]
+            if len(args) < len(param_names):
+                args = list(locs.values())
+            res = sol.{method_name}(*args)
+            outputs.append(serialize_output(res))
+        except Exception as e:
+            outputs.append("ERROR: " + str(e))
+            
+    print("\\n---OUTPUT---\\n".join(outputs))
+
+if __name__ == "__main__":
+    main()
+"""
+    return template.replace("{param_names_str}", param_names_str).replace("{method_name}", method_name)
+
+def generate_js_driver(method_name, params):
+    param_names = [p[0] for p in params]
+    param_names_str = ", ".join([f'"{name}"' for name in param_names])
+    
+    template = """
+// --- DRIVER CODE START ---
+const fs = require('fs');
+
+if (typeof ListNode === 'undefined') {
+    class ListNode {
+        constructor(val, next) {
+            this.val = (val===undefined ? 0 : val);
+            this.next = (next===undefined ? null : next);
+        }
+    }
+    global.ListNode = ListNode;
+}
+if (typeof TreeNode === 'undefined') {
+    class TreeNode {
+        constructor(val, left, right) {
+            this.val = (val===undefined ? 0 : val);
+            this.left = (left===undefined ? null : left);
+            this.right = (right===undefined ? null : right);
+        }
+    }
+    global.TreeNode = TreeNode;
+}
+
+function parseInputBlock(block) {
+    const locs = {};
+    const lines = block.split('\\n');
+    for (let line of lines) {
+        line = line.trim();
+        if (line.includes('=')) {
+            const parts = line.split('=');
+            const name = parts[0].trim();
+            const valStr = parts.slice(1).join('=').trim();
+            try {
+                locs[name] = JSON.parse(valStr);
+            } catch(e) {
+                locs[name] = valStr;
+            }
+        }
+    }
+    return locs;
+}
+
+function serializeOutput(val) {
+    if (val === null || val === undefined) return "null";
+    if (val.val !== undefined && val.next !== undefined) {
+        const arr = [];
+        let curr = val;
+        while (curr) {
+            arr.push(curr.val);
+            curr = curr.next;
+        }
+        return JSON.stringify(arr);
+    }
+    if (val.val !== undefined && val.left !== undefined && val.right !== undefined) {
+        if (!val) return "[]";
+        const res = [];
+        const queue = [val];
+        while (queue.length > 0) {
+            const node = queue.shift();
+            if (node) {
+                res.push(node.val);
+                queue.push(node.left);
+                queue.push(node.right);
+            } else {
+                res.push(null);
+            }
+        }
+        while (res.length > 0 && res[res.length - 1] === null) {
+            res.pop();
+        }
+        return JSON.stringify(res);
+    }
+    return JSON.stringify(val);
+}
+
+function main() {
+    const rawInput = fs.readFileSync(0, 'utf-8');
+    const blocks = rawInput.split("---TESTCASE---");
+    const sol = new Solution();
+    const outputs = [];
+    
+    for (let block of blocks) {
+        block = block.trim();
+        if (!block) continue;
+        try {
+            const locs = parseInputBlock(block);
+            const paramNames = [{param_names_str}];
+            const args = paramNames.map(p => locs[p]);
+            const finalArgs = args.includes(undefined) ? Object.values(locs) : args;
+            const res = sol.{method_name}(...finalArgs);
+            outputs.push(serializeOutput(res));
+        } catch (e) {
+            outputs.push("ERROR: " + e.message);
+        }
+    }
+    console.log(outputs.join("\\n---OUTPUT---\\n"));
+}
+
+main();
+"""
+    return template.replace("{param_names_str}", param_names_str).replace("{method_name}", method_name)
+
+def generate_driver_code(snippet, language):
+    try:
+        method_name, params, return_type = parse_method_signature(snippet, language)
+        if not method_name:
+            return ""
+        if language == "python3" or language == "python":
+            return generate_python_driver(method_name, params)
+        elif language == "javascript":
+            return generate_js_driver(method_name, params)
+        elif language == "java":
+            return generate_java_driver(method_name, params, return_type)
+        elif language == "cpp":
+            return generate_cpp_driver(method_name, params, return_type)
+    except Exception as e:
+        print(f"Error generating driver code for {language}: {e}")
+    return ""
 
 def main():
     start_time = time.time()
@@ -672,13 +1302,14 @@ def main():
             for lang_key, snippet in code_snippets.items():
                 lang_enum = get_enum_language(lang_key)
                 if lang_enum and lang_enum not in inserted_langs:
+                    driver_code_data = generate_driver_code(snippet, lang_key)
                     cur.execute(
                         """
                         INSERT INTO language_templates (
                             language, starter_code, driver_code, question_id, created_at, updated_at
                         ) VALUES (%s, %s, %s, %s, %s, %s)
                         """,
-                        (lang_enum, snippet, "", q_id, now, now)
+                        (lang_enum, snippet, driver_code_data, q_id, now, now)
                     )
                     inserted_langs.add(lang_enum)
                     stats["templates_imported"] += 1

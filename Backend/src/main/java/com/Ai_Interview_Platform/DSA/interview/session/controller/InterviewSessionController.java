@@ -3,6 +3,8 @@ package com.Ai_Interview_Platform.DSA.interview.session.controller;
 import com.Ai_Interview_Platform.DSA.ai.model.AIResponse;
 import com.Ai_Interview_Platform.DSA.conversation.dto.CandidateMessageRequestDTO;
 import com.Ai_Interview_Platform.DSA.interview.session.dto.InterviewCodeSubmissionDTO;
+import com.Ai_Interview_Platform.DSA.interview.session.dto.InterviewReportDTO;
+import com.Ai_Interview_Platform.DSA.interview.session.dto.InterviewSessionHistoryDTO;
 import com.Ai_Interview_Platform.DSA.interview.session.dto.InterviewSessionResponseDTO;
 import com.Ai_Interview_Platform.DSA.interview.session.dto.StartInterviewRequestDTO;
 import com.Ai_Interview_Platform.DSA.interview.session.service.InterviewSessionService;
@@ -31,6 +33,12 @@ public class InterviewSessionController {
 
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(responseDTO);
+    }
+
+    @GetMapping
+    public ResponseEntity<InterviewSessionHistoryDTO> getUserInterviewHistory() {
+        InterviewSessionHistoryDTO history = interviewSessionService.getUserInterviewHistory();
+        return ResponseEntity.ok(history);
     }
 
     @PostMapping("/{sessionId}/start")
@@ -81,5 +89,21 @@ public class InterviewSessionController {
 
         InterviewSessionResponseDTO response = interviewSessionService.getInterviewSession(sessionId);
         return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/{sessionId}/report")
+    public ResponseEntity<InterviewReportDTO> getInterviewReport(
+            @PathVariable UUID sessionId) {
+
+        InterviewReportDTO report = interviewSessionService.getInterviewReport(sessionId);
+        return ResponseEntity.ok(report);
+    }
+
+    @DeleteMapping("/{sessionId}")
+    public ResponseEntity<Void> deleteInterviewSession(
+            @PathVariable UUID sessionId) {
+
+        interviewSessionService.deleteInterviewSession(sessionId);
+        return ResponseEntity.noContent().build();
     }
 }

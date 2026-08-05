@@ -1,10 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Editor from '@monaco-editor/react';
 
 import InterviewHeader from './components/InterviewHeader';
 import ConversationPanel from './components/ConversationPanel';
-import InterviewSidebar from './components/InterviewSidebar';
 import InterviewControls from './components/InterviewControls';
 import AIInterviewerAvatar from './components/AIInterviewerAvatar';
 import Button from '@/components/ui/button/Button';
@@ -23,6 +22,7 @@ import {
   getConversationHistory,
 } from '@/services/interview/conversationService';
 
+import speechService from '@/services/voice/speechService';
 import { cn } from '@/utils/helpers/cn';
 
 const LANGUAGE_OPTIONS = [
@@ -45,6 +45,11 @@ export default function InterviewRoom({ sessionId, sessionDetails: initialDetail
 
   // Dynamic Stage Tracking
   const [currentStage, setCurrentStage] = useState(sessionData?.currentStage || 'DSA_CODING');
+
+  // Voice & Audio States
+  const [isAiSpeaking, setIsAiSpeaking] = useState(false);
+  const [isAiVoiceMuted, setIsAiVoiceMuted] = useState(false);
+  const [showMicModal, setShowMicModal] = useState(true);
 
   // Conversation & AI State
   const [conversationId, setConversationId] = useState(null);
@@ -77,17 +82,112 @@ export default function InterviewRoom({ sessionId, sessionDetails: initialDetail
   const [showConsole, setShowConsole] = useState(false);
 
   // Layout split widths (horizontal)
-  const [leftWidth, setLeftWidth] = useState(32);
-  const [rightWidth, setRightWidth] = useState(25);
+  const [leftWidth, setLeftWidth] = useState(30);
+  const [rightWidth, setRightWidth] = useState(28);
   const [isResizingLeft, setIsResizingLeft] = useState(false);
   const [isResizingRight, setIsResizingRight] = useState(false);
 
-  // Vertical split in left column: avatar height (percent of left column)
-  const [avatarHeightPct, setAvatarHeightPct] = useState(30);
-  const [isResizingVertical, setIsResizingVertical] = useState(false);
-  const leftColumnRef = useRef(null);
-
   const editorRef = useRef(null);
+
+  // Helper to trigger AI Text-To-Speech
+  const speakText = useCallback(
+    (text) => {
+      if (!text || isAiVoiceMuted) return;
+      speechService.speak(text, {
+        onStart: () => setIsAiSpeaking(true),
+        onEnd: () => setIsAiSpeaking(false),
+        onError: () => setIsAiSpeaking(false),
+      });
+    },
+    [isAiVoiceMuted]
+  );
+
+  const handleToggleAiVoice = () => {
+    const nextState = !isAiVoiceMuted;
+    setIsAiVoiceMuted(nextState);
+    speechService.setMuted(nextState);
+    if (nextState) {
+      setIsAiSpeaking(false);
+    }
+  };
+
+  // Mic permission setup handlers
+  const handleEnableMic = async () => {
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+      setIsMicOn(true);
+    } catch (err) {
+      console.warn('Microphone access check warning:', err);
+      setIsMicOn(false);
+    } finally {
+      setShowMicModal(false);
+    }
+  };
+
+  const handleSkipMic = () => {
+    setIsMicOn(false);
+    setShowMicModal(false);
+  };
+
+  // Exit Safeguard Modal State
+  const [showExitConfirmModal, setShowExitConfirmModal] = useState(false);
+  const targetExitPathRef = useRef('/dashboard');
+  const isExitingAllowedRef = useRef(false);
+
+  // ── Safeguard 1: Prevent accidental browser navigation, reload, or tab close ──
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (!isFinished && !isExitingAllowedRef.current) {
+        e.preventDefault();
+        e.returnValue = 'An interview session is currently in progress. Are you sure you want to leave?';
+        return e.returnValue;
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isFinished]);
+
+  // ── Safeguard 2: Intercept Browser Back / Forward Button ──
+  useEffect(() => {
+    if (isFinished) return;
+
+    window.history.pushState({ interviewActive: true }, '', window.location.href);
+
+    const handlePopState = () => {
+      if (!isFinished && !isExitingAllowedRef.current) {
+        window.history.pushState({ interviewActive: true }, '', window.location.href);
+        targetExitPathRef.current = '/dashboard';
+        setShowExitConfirmModal(true);
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [isFinished]);
+
+  const handleRequestExit = (targetPath = '/dashboard') => {
+    targetExitPathRef.current = targetPath;
+    setShowExitConfirmModal(true);
+  };
+
+  const handleConfirmExitSession = () => {
+    isExitingAllowedRef.current = true;
+    setShowExitConfirmModal(false);
+    navigate(targetExitPathRef.current);
+  };
+
+  useEffect(() => {
+    return () => {
+      speechService.stop();
+    };
+  }, []);
 
   // 1. Fetch Session Details & Load Conversation History
   useEffect(() => {
@@ -126,12 +226,16 @@ export default function InterviewRoom({ sessionId, sessionDetails: initialDetail
 
           if (historyDTO && Array.isArray(historyDTO.messages) && historyDTO.messages.length > 0) {
             setMessages(historyDTO.messages);
+            // Read latest AI message if present
+            const lastAiMsg = [...historyDTO.messages].reverse().find((m) => m.role === 'AI');
+            if (lastAiMsg && lastAiMsg.content) {
+              speakText(lastAiMsg.content);
+            }
           } else {
             // Fresh session: trigger backend /start endpoint to begin interview
             try {
               setIsAiTyping(true);
               const aiStartResp = await startInterviewSession(sessionId);
-              // Fix #1: AIResponse Java field is `response`, not `rawResponse`
               if (isMounted && aiStartResp && aiStartResp.response) {
                 const initialAiMsg = {
                   messageId: `ai-start-${Date.now()}`,
@@ -140,6 +244,7 @@ export default function InterviewRoom({ sessionId, sessionDetails: initialDetail
                   createdAt: new Date().toISOString(),
                 };
                 setMessages([initialAiMsg]);
+                speakText(aiStartResp.response);
               }
             } catch (startErr) {
               console.warn('Auto-start interview call error:', startErr);
@@ -165,7 +270,7 @@ export default function InterviewRoom({ sessionId, sessionDetails: initialDetail
     return () => {
       isMounted = false;
     };
-  }, [sessionId]);
+  }, [sessionId, speakText]);
 
   // REQUIREMENT 5: Handle Candidate Message Submission (Conversational Flow)
   const handleSendMessage = async (text) => {
@@ -186,7 +291,6 @@ export default function InterviewRoom({ sessionId, sessionDetails: initialDetail
 
     try {
       const aiResponse = await sendSessionMessage(sessionId, text);
-      // Fix #1: AIResponse Java field is `response`, not `rawResponse`
       if (aiResponse && aiResponse.response) {
         const aiMessage = {
           messageId: `ai-${Date.now()}`,
@@ -195,6 +299,7 @@ export default function InterviewRoom({ sessionId, sessionDetails: initialDetail
           createdAt: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, aiMessage]);
+        speakText(aiResponse.response);
       }
     } catch (err) {
       console.error('Failed to deliver message to AI:', err);
@@ -222,7 +327,6 @@ export default function InterviewRoom({ sessionId, sessionDetails: initialDetail
 
     try {
       const aiResponse = await requestSessionHint(sessionId);
-      // Fix #1: AIResponse Java field is `response`, not `rawResponse`
       if (aiResponse && aiResponse.response) {
         const aiMessage = {
           messageId: `ai-hint-${Date.now()}`,
@@ -231,6 +335,7 @@ export default function InterviewRoom({ sessionId, sessionDetails: initialDetail
           createdAt: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, aiMessage]);
+        speakText(aiResponse.response);
       }
     } catch (err) {
       console.error('Failed to fetch hint:', err);
@@ -264,7 +369,6 @@ export default function InterviewRoom({ sessionId, sessionDetails: initialDetail
       };
 
       const aiResponse = await submitSessionCode(sessionId, payload);
-      // Fix #1: AIResponse Java field is `response`, not `rawResponse`
       if (aiResponse && aiResponse.response) {
         const aiMessage = {
           messageId: `ai-eval-${Date.now()}`,
@@ -273,6 +377,7 @@ export default function InterviewRoom({ sessionId, sessionDetails: initialDetail
           createdAt: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, aiMessage]);
+        speakText(aiResponse.response);
       }
     } catch (err) {
       console.error('Failed to submit code:', err);
@@ -367,12 +472,12 @@ export default function InterviewRoom({ sessionId, sessionDetails: initialDetail
     const handleMouseMove = (e) => {
       if (isResizingLeft) {
         const newWidth = (e.clientX / window.innerWidth) * 100;
-        if (newWidth > 25 && newWidth < 55) {
+        if (newWidth > 22 && newWidth < 50) {
           setLeftWidth(newWidth);
         }
       } else if (isResizingRight) {
         const newRight = ((window.innerWidth - e.clientX) / window.innerWidth) * 100;
-        if (newRight > 18 && newRight < 35) {
+        if (newRight > 20 && newRight < 40) {
           setRightWidth(newRight);
         }
       }
@@ -394,25 +499,6 @@ export default function InterviewRoom({ sessionId, sessionDetails: initialDetail
     };
   }, [isResizingLeft, isResizingRight]);
 
-  // Vertical resize (avatar vs chat in left column)
-  useEffect(() => {
-    const handleVerticalMove = (e) => {
-      if (!isResizingVertical || !leftColumnRef.current) return;
-      const rect = leftColumnRef.current.getBoundingClientRect();
-      const pct = ((e.clientY - rect.top) / rect.height) * 100;
-      if (pct >= 10 && pct <= 80) setAvatarHeightPct(pct);
-    };
-    const handleVerticalUp = () => setIsResizingVertical(false);
-    if (isResizingVertical) {
-      document.addEventListener('mousemove', handleVerticalMove);
-      document.addEventListener('mouseup', handleVerticalUp);
-    }
-    return () => {
-      document.removeEventListener('mousemove', handleVerticalMove);
-      document.removeEventListener('mouseup', handleVerticalUp);
-    };
-  }, [isResizingVertical]);
-
   const welcomeMessage = `Welcome to your live technical interview at ${companyName} for the ${roleName} position. I am your AI Technical Interviewer. We will be walking through technical concepts and live coding challenges today. Feel free to explain your approach or submit answers at any point.`;
 
   const handleStartCoding = () => {
@@ -431,13 +517,8 @@ export default function InterviewRoom({ sessionId, sessionDetails: initialDetail
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#070714] text-slate-100 transition-colors duration-300">
       {/* Resizing Overlay */}
-      {(isResizingLeft || isResizingRight || isResizingVertical) && (
-        <div
-          className={cn(
-            'absolute inset-0 z-50 select-none',
-            isResizingVertical ? 'cursor-row-resize' : 'cursor-col-resize'
-          )}
-        />
+      {(isResizingLeft || isResizingRight) && (
+        <div className="absolute inset-0 z-50 select-none cursor-col-resize" />
       )}
 
       {/* Header */}
@@ -448,52 +529,32 @@ export default function InterviewRoom({ sessionId, sessionDetails: initialDetail
         difficulty={difficulty}
         onStartInterview={handleStartInterview}
         onStartCoding={handleStartCoding}
-        onSetProfile={() => navigate('/profile')}
+        onSetProfile={() => handleRequestExit('/profile')}
         onAutoFinish={handleAutoFinish}
       />
 
-      {/* Main Workspace */}
+      {/* Main Workspace: Left=Transcript | Center=Editor | Right=Avatar+Info+Controls */}
       <main className="relative flex flex-1 overflow-hidden p-3 gap-2">
-        {/* Left: AI Interviewer Avatar (resizable) + Chat */}
+
+        {/* ── LEFT: Full AI Conversation Transcript Sidebar ── */}
         <div
-          ref={leftColumnRef}
           style={{ width: `${leftWidth}%` }}
           className="flex flex-col h-full shrink-0"
         >
-          {/* Avatar panel */}
-          <div style={{ height: `${avatarHeightPct}%` }} className="shrink-0 min-h-0">
-            <AIInterviewerAvatar
-              isSpeaking={isAiTyping}
-              name="Alex"
-              title="Senior Software Engineer · AI Interviewer"
-              className="w-full h-full"
-            />
-          </div>
-
-          {/* Vertical drag handle between avatar and chat */}
-          <div
-            className={cn(
-              'group relative flex h-2.5 w-full cursor-row-resize items-center justify-center shrink-0 my-0.5 rounded-full bg-slate-800/80 hover:bg-violet-600/80 transition-colors z-10',
-              isResizingVertical && 'bg-violet-500'
-            )}
-            onMouseDown={() => setIsResizingVertical(true)}
-            title="Drag up or down to resize AI Feed / Transcript"
-          >
-            <div className="h-1 w-8 rounded-full bg-slate-500/80 group-hover:bg-white/90 transition-colors" />
-          </div>
-
-          {/* Chat / Conversation Panel — grows to fill remaining height */}
           <ConversationPanel
             conversationId={conversationId}
             messages={messages}
             isLoading={isConversationLoading}
             isSending={isSendingMessage}
             isAiTyping={isAiTyping}
+            isAiSpeaking={isAiSpeaking}
             error={conversationError}
             sendError={sendError}
             welcomeMessage={welcomeMessage}
             onSendMessage={handleSendMessage}
-            className="flex-1 min-h-0"
+            isMicOn={isMicOn}
+            onToggleMic={() => setIsMicOn(!isMicOn)}
+            className="h-full"
           />
         </div>
 
@@ -506,7 +567,7 @@ export default function InterviewRoom({ sessionId, sessionDetails: initialDetail
           onMouseDown={handleMouseDownLeft}
         />
 
-        {/* Center: Live Editor & Execution Console */}
+        {/* ── CENTER: Live Code Editor ── */}
         <div className="flex flex-1 flex-col overflow-hidden rounded-2xl border border-slate-800 bg-[#0f111a] shadow-xl backdrop-blur-md">
           {/* Workspace Bar */}
           <div className="flex items-center justify-between border-b border-slate-800 bg-[#161826] px-4 py-2.5 text-slate-200 shrink-0">
@@ -514,26 +575,21 @@ export default function InterviewRoom({ sessionId, sessionDetails: initialDetail
               <span className="flex h-2 w-2 rounded-full bg-emerald-500" />
               <span className="text-xs font-extrabold tracking-tight text-white">Live Editor</span>
             </div>
-
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Language</label>
-                <select
-                  value={selectedLanguage}
-                  onChange={(e) => handleLanguageChange(e.target.value)}
-                  className="rounded-lg bg-[#202336] border border-slate-700/60 px-2.5 py-1 text-xs text-slate-100 outline-none focus:border-violet-500"
-                >
-                  {LANGUAGE_OPTIONS.map((lang) => (
-                    <option key={lang.id} value={lang.id}>
-                      {lang.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <div className="flex items-center gap-1.5">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Language</label>
+              <select
+                value={selectedLanguage}
+                onChange={(e) => handleLanguageChange(e.target.value)}
+                className="rounded-lg bg-[#202336] border border-slate-700/60 px-2.5 py-1 text-xs text-slate-100 outline-none focus:border-violet-500"
+              >
+                {LANGUAGE_OPTIONS.map((lang) => (
+                  <option key={lang.id} value={lang.id}>{lang.label}</option>
+                ))}
+              </select>
             </div>
           </div>
 
-          {/* Editor Container */}
+          {/* Editor */}
           <div className="flex-1 overflow-hidden relative">
             <Editor
               height="100%"
@@ -542,9 +598,7 @@ export default function InterviewRoom({ sessionId, sessionDetails: initialDetail
               value={codeContent}
               onChange={(value) => setCodeContent(value || '')}
               beforeMount={handleEditorWillMount}
-              onMount={(editor) => {
-                editorRef.current = editor;
-              }}
+              onMount={(editor) => { editorRef.current = editor; }}
               options={{
                 fontSize: 13,
                 fontFamily: 'Fira Code, monospace',
@@ -559,31 +613,20 @@ export default function InterviewRoom({ sessionId, sessionDetails: initialDetail
             />
           </div>
 
-          {/* REQUIREMENT 8: Code Execution Console Output Drawer */}
+          {/* Execution Console */}
           {showConsole && (
             <div className="border-t border-slate-800 bg-[#121422] p-3 text-xs shrink-0 max-h-40 overflow-y-auto">
               <div className="flex items-center justify-between mb-2">
-                <span className="font-bold text-slate-300 flex items-center gap-1.5">
-                  <span>⚙️ Execution Console Output</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setShowConsole(false)}
-                  className="text-[10px] text-slate-400 hover:text-white"
-                >
-                  ✕ Close Console
-                </button>
+                <span className="font-bold text-slate-300">⚙️ Execution Console Output</span>
+                <button type="button" onClick={() => setShowConsole(false)} className="text-[10px] text-slate-400 hover:text-white">✕ Close</button>
               </div>
-
               {isExecutingCode ? (
                 <div className="flex items-center gap-2 text-violet-400 py-2">
                   <span className="h-3 w-3 rounded-full border-2 border-violet-400 border-t-transparent animate-spin" />
-                  <span>Compiling & Executing Solution...</span>
+                  <span>Compiling & Executing...</span>
                 </div>
               ) : executionOutput ? (
-                <pre className="font-mono text-[11px] text-emerald-400 whitespace-pre-wrap bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-                  {executionOutput.stdout}
-                </pre>
+                <pre className="font-mono text-[11px] text-emerald-400 whitespace-pre-wrap bg-slate-950 p-2.5 rounded-lg border border-slate-800">{executionOutput.stdout}</pre>
               ) : null}
             </div>
           )}
@@ -598,30 +641,54 @@ export default function InterviewRoom({ sessionId, sessionDetails: initialDetail
           onMouseDown={handleMouseDownRight}
         />
 
-        {/* Right: Candidate Feed Sidebar + Controls */}
-        <div style={{ width: `${rightWidth}%` }} className="flex flex-col h-full shrink-0 gap-2">
-          <InterviewSidebar
-            isCameraOn={isCameraOn}
-            isMicOn={isMicOn}
-            interviewType={interviewType}
-            difficulty={difficulty}
-            currentStage={currentStage}
-            currentQuestion={sessionData?.currentQuestion || 'Group Anagrams'}
-            onToggleCamera={() => setIsCameraOn(!isCameraOn)}
-            onToggleMic={() => setIsMicOn(!isMicOn)}
-            className="flex-1 min-h-0"
-          />
+        {/* ── RIGHT: AI Avatar + Interview Info + Controls ── */}
+        <div style={{ width: `${rightWidth}%` }} className="flex flex-col h-full shrink-0 gap-2.5 min-h-0">
 
-          {/* Action Controls Panel — below Candidate Feed */}
+          {/* AI Interviewer Avatar Feed — expanded flex-1 space */}
+          <div className="flex-1 min-h-0 rounded-2xl border border-slate-800 bg-[#0f111a] shadow-xl backdrop-blur-md overflow-hidden">
+            <AIInterviewerAvatar
+              isSpeaking={isAiSpeaking || isAiTyping}
+              name="Alex"
+              title="Senior Software Engineer · AI Interviewer"
+              className="w-full h-full"
+            />
+          </div>
+
+          {/* Interview Info Metrics */}
+          <div className="shrink-0 rounded-2xl border border-slate-800 bg-[#0f111a] p-3 shadow-xl backdrop-blur-md">
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-xl border border-slate-800/80 bg-[#141727] p-2">
+                <span className="text-[8px] font-bold uppercase tracking-wider text-slate-500 block mb-0.5">Type</span>
+                <span className="text-[11px] font-extrabold text-white">{interviewType}</span>
+              </div>
+              <div className="rounded-xl border border-slate-800/80 bg-[#141727] p-2">
+                <span className="text-[8px] font-bold uppercase tracking-wider text-slate-500 block mb-0.5">Difficulty</span>
+                <span className={cn(
+                  'text-[11px] font-extrabold',
+                  difficulty === 'EASY' && 'text-emerald-400',
+                  difficulty === 'MEDIUM' && 'text-amber-400',
+                  difficulty === 'HARD' && 'text-rose-400'
+                )}>{difficulty}</span>
+              </div>
+              <div className="rounded-xl border border-slate-800/80 bg-[#141727] p-2">
+                <span className="text-[8px] font-bold uppercase tracking-wider text-slate-500 block mb-0.5">Stage</span>
+                <span className="text-[11px] font-extrabold text-violet-300 truncate block">{currentStage}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Controls — fixed at bottom */}
           <InterviewControls
             isCameraOn={isCameraOn}
             isMicOn={isMicOn}
+            isAiVoiceMuted={isAiVoiceMuted}
             isAiTyping={isAiTyping}
             isExecutingCode={isExecutingCode}
             isSubmittingCode={isSubmittingCode}
             isRequestingHint={isRequestingHint}
             onToggleCamera={() => setIsCameraOn(!isCameraOn)}
             onToggleMic={() => setIsMicOn(!isMicOn)}
+            onToggleAiVoice={handleToggleAiVoice}
             onResetCode={handleResetCode}
             onRunCode={handleRunCode}
             onRequestHint={handleRequestHint}
@@ -630,6 +697,46 @@ export default function InterviewRoom({ sessionId, sessionDetails: initialDetail
           />
         </div>
       </main>
+
+      {/* Initial Microphone Permission & Setup Modal */}
+      {showMicModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in">
+          <div className="w-full max-w-md rounded-3xl border border-violet-500/40 bg-[#0c0d1c] p-6 shadow-2xl space-y-5 text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-600 text-3xl shadow-lg shadow-violet-900/50 animate-bounce">
+              🎙️
+            </div>
+            <div>
+              <h3 className="text-xl font-extrabold text-white tracking-tight">
+                Turn On Microphone for AI Interview
+              </h3>
+              <p className="mt-2 text-xs sm:text-sm text-slate-300 leading-relaxed">
+                Your AI interviewer will speak questions out loud and listen to your verbal responses during the technical session.
+              </p>
+            </div>
+
+            <div className="rounded-2xl bg-violet-500/10 border border-violet-500/20 p-3 text-xs text-violet-300 font-medium">
+              💡 You can mute your microphone or turn AI voice audio off anytime during the interview using the toolbar.
+            </div>
+
+            <div className="flex flex-col gap-2.5 pt-2">
+              <Button
+                variant="primary"
+                className="w-full h-11 text-sm font-bold bg-gradient-to-r from-violet-600 via-indigo-600 to-purple-600 shadow-lg shadow-violet-500/30"
+                onClick={handleEnableMic}
+              >
+                🎙️ Turn On Microphone & Start
+              </Button>
+              <button
+                type="button"
+                onClick={handleSkipMic}
+                className="text-xs text-slate-400 hover:text-white transition-colors py-1.5 font-semibold"
+              >
+                Continue with Text Only (Mute Mic)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
 
       {/* Auto-Submitting Banner Overlay */}
@@ -673,9 +780,52 @@ export default function InterviewRoom({ sessionId, sessionDetails: initialDetail
               <Button
                 variant="primary"
                 className="w-full h-11 text-sm font-bold bg-gradient-to-r from-violet-600 to-indigo-600 shadow-lg shadow-violet-500/25"
-                onClick={() => navigate('/dashboard')}
+                onClick={() => {
+                  isExitingAllowedRef.current = true;
+                  navigate('/dashboard');
+                }}
               >
                 Return to Dashboard
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Exit Safeguard Confirmation Modal */}
+      {showExitConfirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in">
+          <div className="w-full max-w-md rounded-3xl border border-amber-500/40 bg-[#0c0d1c] p-6 shadow-2xl space-y-5 text-center">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-500/20 text-amber-400 text-3xl shadow-lg border border-amber-500/30">
+              ⚠️
+            </div>
+            <div>
+              <h3 className="text-lg font-extrabold text-white tracking-tight">
+                Interview Session in Progress
+              </h3>
+              <p className="mt-2 text-xs sm:text-sm text-slate-300 leading-relaxed">
+                You are currently in an active AI technical interview session. Leaving now will exit your live session.
+              </p>
+            </div>
+
+            <div className="rounded-2xl bg-amber-500/10 border border-amber-500/20 p-3 text-xs text-amber-300 font-medium">
+              💡 Are you sure you want to stop and exit the interview room?
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <Button
+                variant="outline"
+                className="flex-1 h-11 text-xs sm:text-sm font-semibold border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800"
+                onClick={() => setShowExitConfirmModal(false)}
+              >
+                Continue Session
+              </Button>
+              <Button
+                variant="danger"
+                className="flex-1 h-11 text-xs sm:text-sm font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-lg shadow-rose-600/30"
+                onClick={handleConfirmExitSession}
+              >
+                Confirm Exit
               </Button>
             </div>
           </div>
