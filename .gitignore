@@ -10,3 +10,4 @@ Frontend/dist/
 Frontend/.env
 Frontend/.env.*
 !Frontend/.env.example
+!Frontend/.env.production
