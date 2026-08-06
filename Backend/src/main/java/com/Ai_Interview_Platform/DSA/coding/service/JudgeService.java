@@ -127,7 +127,7 @@ public class JudgeService {
             String userCode
     ) {
         LanguageTemplate template = getLanguageTemplate(question, language);
-        return judgeCodeBuilder.buildCode(userCode, template.getDriverCode());
+        return judgeCodeBuilder.buildCode(userCode, template.getDriverCode(), language);
     }
 
     private boolean outputsMatch(String actual, String expected) {
