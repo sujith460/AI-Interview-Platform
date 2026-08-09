@@ -94,10 +94,20 @@ public class JudgeService {
                 .build();
     }
 
+    private boolean isDummyTestCase(TestCase testCase) {
+        if (testCase == null) return true;
+        String input = testCase.getInput();
+        String expected = testCase.getExpectedOutput();
+        boolean invalidInput = input != null && (input.startsWith("Hidden input variation") || input.contains("Hidden input variation"));
+        boolean invalidExpected = expected != null && (expected.startsWith("Expected output variation") || expected.contains("Expected output variation"));
+        return invalidInput || invalidExpected;
+    }
+
     private List<TestCase> getSampleTestCases(Question question) {
         return question.getTestCases()
                 .stream()
                 .filter(TestCase::getSample)
+                .filter(testCase -> !isDummyTestCase(testCase))
                 .sorted(Comparator.comparing(TestCase::getOrderIndex))
                 .toList();
     }
@@ -106,6 +116,7 @@ public class JudgeService {
         return question.getTestCases()
                 .stream()
                 .filter(testCase -> !testCase.getSample())
+                .filter(testCase -> !isDummyTestCase(testCase))
                 .sorted(Comparator.comparing(TestCase::getOrderIndex))
                 .toList();
     }
@@ -113,6 +124,7 @@ public class JudgeService {
     private List<TestCase> getAllTestCases(Question question) {
         return question.getTestCases()
                 .stream()
+                .filter(testCase -> !isDummyTestCase(testCase))
                 .sorted(Comparator.comparing(TestCase::getOrderIndex))
                 .toList();
     }

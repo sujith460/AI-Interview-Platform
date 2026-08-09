@@ -169,25 +169,6 @@ def generate_hidden_test_cases(title, slug, examples):
             except Exception:
                 pass
 
-    if len(hidden_cases) < 3:
-        hidden_cases = [
-            {
-                "input": "Hidden input variation A for " + title,
-                "expectedOutput": "Expected output variation A",
-                "explanation": "System generated verification case."
-            },
-            {
-                "input": "Hidden input variation B for " + title,
-                "expectedOutput": "Expected output variation B",
-                "explanation": "System generated boundary case."
-            },
-            {
-                "input": "Hidden input variation C for " + title,
-                "expectedOutput": "Expected output variation C",
-                "explanation": "System generated scale case."
-            }
-        ]
-        
     return hidden_cases
 
 def map_difficulty(diff_str):
@@ -431,6 +412,14 @@ public class Main {
                 aLine = aLine.trim();
                 if (aLine.contains("=")) {
                     vals.add(aLine.split("=", 2)[1].trim());
+                }
+            }
+            if (vals.isEmpty()) {
+                for (String aLine : assignmentLines) {
+                    aLine = aLine.trim();
+                    if (!aLine.isEmpty()) {
+                        vals.add(aLine);
+                    }
                 }
             }
             
