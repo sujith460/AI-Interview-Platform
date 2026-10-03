@@ -19,7 +19,8 @@ public class CorsConfig {
         configuration.setAllowedOrigins(List.of(
                 "https://kind-mud-085999610.7.azurestaticapps.net",
                 "http://localhost:5173",
-                "http://localhost:3000"
+                "http://localhost:3000",
+                "https://ai-interview-platform-production-4a00.up.railway.app"
         ));
 
         configuration.setAllowedMethods(List.of(
