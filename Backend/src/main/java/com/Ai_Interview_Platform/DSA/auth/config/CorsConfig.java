@@ -20,7 +20,7 @@ public class CorsConfig {
                 "https://kind-mud-085999610.7.azurestaticapps.net",
                 "http://localhost:5173",
                 "http://localhost:3000",
-                "https://ai-interview-platform-production-4a00.up.railway.app"
+                "https://ai-interview-platform-git-main-sujith460s-projects.vercel.app"
         ));
 
         configuration.setAllowedMethods(List.of(
